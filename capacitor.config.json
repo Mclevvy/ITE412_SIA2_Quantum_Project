@@ -1,0 +1,6 @@
+{
+  "appId": "com.ferma.app",
+  "appName": "Project FERMA",
+  "webDir": "build",
+  "bundledWebRuntime": false
+}
