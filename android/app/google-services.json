@@ -1,0 +1,40 @@
+{
+  "project_info": {
+    "project_number": "696158561611",
+    "firebase_url": "https://ferma-9eb60-default-rtdb.asia-southeast1.firebasedatabase.app",
+    "project_id": "ferma-9eb60",
+    "storage_bucket": "ferma-9eb60.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:696158561611:android:4ed182556128894014b4ce",
+        "android_client_info": {
+          "package_name": "com.buniussense.app"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "696158561611-vpp70rpbufdcjh83mfm9t1h70peedn80.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyA7S6JNr3Xt3MaFcfp_c87vzTAP65gqxiE"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "696158561611-vpp70rpbufdcjh83mfm9t1h70peedn80.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

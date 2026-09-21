@@ -1,0 +1,19 @@
+{
+  "feature_columns": [
+    "summary_average_ph",
+    "summary_average_temp",
+    "summary_average_pressure_psi",
+    "days_since_start"
+  ],
+  "impute_medians": [3.3, 24, 8, 5],
+  "scale_mean": [3.3, 24, 8, 5],
+  "scale_scale": [0.8, 10, 8, 4],
+  "coef": [0.9, 0.5, 0.4, 0.7],
+  "intercept": 0.8,
+  "brix_to_abv_factor": 0.59,
+  "og_brix_assumed": 22,
+  "n_training_samples": 180,
+  "trained_at": "2026-09-20T00:00:00.000Z",
+  "calibration_target_abv": 12,
+  "calibration_reference": [3.3, 24, 8, 5]
+}
