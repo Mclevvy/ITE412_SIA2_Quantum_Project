@@ -5,7 +5,7 @@ Bunius-Sense
 **Repository:** https://github.com/Mclevvy/ITE412_SIA2_Quantum_Project
 
 ## Team Members & Roles
--  — Team Lead
+- Faye Chaleigh Anne M. Anonuevo — Team Lead
 - Lizzie S. Lorenzo — Documentation Lead
 - Jan Selvister M. Montoya — Integration Lead
 - Jan Selvister M. Montoya — Developer
