@@ -6,7 +6,7 @@ Bunius-Sense
 
 ## Team Members & Roles
 -  — Team Lead
--  — Documentation Lead
+- Lizzie S. Lorenzo — Documentation Lead
 - Jan Selvister M. Montoya — Integration Lead
 - Jan Selvister M. Montoya — Developer
 -  — Tester
