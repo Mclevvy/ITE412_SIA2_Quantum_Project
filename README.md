@@ -9,7 +9,8 @@ Bunius-Sense
 -  — Documentation Lead
 - Jan Selvister M. Montoya — Integration Lead
 - Jan Selvister M. Montoya — Developer
--  — Tester
+- Mark Angelo G. Oprido - Tester
+- 
 
 ## Project Summary
 VinoTrack is a real-time monitoring system for small-scale bignay wine production. It tracks fermentation conditions (temperature, sugar/brix level, and pH) as the wine ferments, storing readings in a live database so producers can see the status of a batch at any moment instead of checking it manually. The system authenticates users so only the winemaker and staff can view or manage batches, and sends push notifications when a batch needs attention (e.g., temperature drifting out of range or a fermentation stage completing). The intended users are small local bignay winemakers, such as our partner stakeholder Sir Jerry M. Casabar, who currently rely on manual checks and experience alone to judge fermentation progress.
