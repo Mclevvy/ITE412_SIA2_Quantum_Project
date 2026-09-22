@@ -1,13 +1,2 @@
-node_modules
-dist
-build
-build - Copy
-.env
-.env.*
-!.env.example
-android/.gradle
-android/build
-android/app/build
-android/capacitor-cordova-android-plugins/build
-ios/App/DerivedData
+node_modules/
 *.log
