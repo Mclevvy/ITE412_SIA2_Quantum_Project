@@ -1,25 +1,5 @@
 # Project Overview
 
-## High-Level System Overview
-
-### 1. Major Modules/Subsystems
-
-#### 1.1 IoT Fermentation Monitoring Module
-
-This module collects and monitors real-time fermentation data, including temperature, pressure, sugar content, and acidity/pH levels. It enables winemakers to observe important fermentation conditions and supports timely monitoring and control of the fermentation process.
-
-#### 1.2 Automated Bignay Fruit Sorting Module
-
-This module supports the automated classification and sorting of bignay fruits using an automated sorting machine and machine learning techniques. It helps identify suitable fruits and reduce the inclusion of unwanted or unqualified materials before fermentation.
-
-#### 1.3 Machine Learning Prediction Module
-
-This module analyzes collected sensor and production data to generate predictions, including harvest-time prediction and possible fermentation outcomes. It supports decision-making and helps improve consistency and efficiency in bignay wine production.
-
-#### 1.4 Reporting and Dashboard Module
-
-This module presents real-time sensor visualizations, analytical reports, and process status information. It allows the winemaker to monitor production activities, view fermentation conditions, and review system-generated results.
-
 ## 1. System Objectives
 - **Problem:** Bignay wine fermentation is currently monitored manually — the winemaker checks temperature, sugar level, and pH by hand and by experience. This is time-consuming, inconsistent, and can let a batch spoil or ferment poorly if a problem isn't caught early.
 - **Who benefits and how:** Small-scale bignay wine producers (represented by our stakeholder, Sir Jerry M. Casabar) benefit from real-time visibility into their fermentation batches, fewer spoiled batches, and more consistent wine quality. Down the line, this also benefits consumers of the finished wine through better, more reliable quality control.
@@ -45,3 +25,43 @@ This module presents real-time sensor visualizations, analytical reports, and pr
 - **Repos/Services:** GitHub (this repository)
 - **Testing tools:** Postman (API testing), Jest (unit tests)
 
+## High-Level System Overview
+
+### 1. Major Modules/Subsystems
+- **Authentication Module** – Handles winemaker/staff login and role-based access using Firebase Authentication, so only authorized people can view or update fermentation batches.
+- **Sensor Data Collection Module** – Receives readings (temperature, pH, sugar/brix level) from IoT sensors attached to fermentation vats and writes them to the realtime database at set intervals.
+- **Fermentation Monitoring & Alerting Module** – Continuously evaluates incoming readings against ideal fermentation ranges, logs any out-of-range events, and triggers alerts when a batch needs attention.
+- **Notification Module** – Delivers real-time push notifications to the winemaker's device (via Firebase Cloud Messaging) whenever the monitoring module raises an alert.
+- **Dashboard Module** – Presents a real-time and historical view of each batch's fermentation status to the winemaker and staff, and lets staff log manual batch updates.
+
+### 2. External Systems/Interfaces
+- **Firebase Realtime Database** – stores live and historical sensor readings and alert logs.
+- **Firebase Authentication** – manages user accounts and login sessions.
+- **Firebase Cloud Messaging (FCM)** – third-party push notification service used to deliver alerts to the winemaker's phone.
+- **IoT Sensor Hardware (ESP32/Arduino + temperature, pH, and brix/hydrometer sensors)** – external data source feeding readings into the system via REST API calls.
+
+### 3. Data Flow Summary
+IoT sensors attached to each fermentation vat periodically send temperature, pH, and sugar/brix readings to the system's backend through REST calls. The Sensor Data Collection module stores each reading in the Fermentation Readings data store (Firebase Realtime Database). The Monitoring & Alerting module continuously reads the latest values, compares them against acceptable fermentation ranges, and — when a reading is out of range or a fermentation stage changes — logs the event to the Alerts Log and passes an alert trigger to the Notification module, which sends a push notification to the winemaker through FCM. Separately, the Authentication module verifies the winemaker's or staff's credentials against the User Accounts store before granting access to the Dashboard module, which pulls both current and historical readings and alerts to display batch status in real time, and accepts manual batch updates from staff.
+
+## Integration Pattern & Rationale
+
+### Integration Pattern
+Bunius-Sense integrates its modules through a **REST API** layer built with Node.js and Express. The first two modules implemented under this pattern are:
+
+- **Batches Module** (`/batches`) — CRUD endpoints for fermentation batch records (wine type, start date, status).
+- **Readings Module** (`/readings`) — CRUD endpoints for sensor readings (temperature, pH, brix) linked to a batch via `batchId`.
+
+Both modules expose standard HTTP verbs (`GET`, `POST`, `PUT`, `DELETE`) over JSON, and currently use in-memory data stores as placeholders for the Firebase Realtime Database described in the architecture above. The high-level architecture diagram (`/docs/HighLevelArch.png`) shows how these two REST modules sit between the client layer (dashboard and IoT sensors) and the data layer, and how the Readings module hands off to the Notification module when a reading breaches a threshold.
+
+### Rationale
+- **REST over other patterns for this stage:** REST was chosen over a message queue or heavier event-driven setup because the current interactions (a sensor posting a reading, a dashboard fetching batch status) are simple, synchronous request/response exchanges. REST is lightweight, easy for all team members to test independently with Postman, and maps directly onto the CRUD operations each module needs.
+- **Where a different pattern fits later:** The push-notification hand-off (Readings/Monitoring → Notification → FCM) is closer to an event-driven trigger than a plain CRUD call, so a lightweight webhook or pub/sub mechanism may replace the direct REST call to the Notification module as the system grows — but REST is sufficient and simplest for this lab's two core modules.
+- **In-memory data for now:** Dummy in-memory arrays are used instead of Firebase in this lab so the team can build and test the API contract (endpoints, request/response shapes) before wiring in the real database, per the lab's own instructions.
+
+### Running & Testing the API
+1. From the repo root, go to `/src/api`.
+2. Run `npm install` once, then `npm start` (or `node server.js`).
+3. Access the endpoints at:
+   - `http://localhost:3000/batches`
+   - `http://localhost:3000/readings`
+4. Import `/integration/PostmanCollection.json` into Postman to run the prepared test cases for both modules.
