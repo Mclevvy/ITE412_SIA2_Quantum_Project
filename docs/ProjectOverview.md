@@ -28,19 +28,29 @@
 
 ## High-Level System Overview
 
-  1. Major Modules/Subsystems
-     Authentication Module – Handles winemaker/staff login and role-based access using Firebase Authentication, so only authorized people can view or update fermentation batches.
-     Sensor Data Collection Module – Receives readings (temperature, pH, sugar/brix level) from IoT sensors attached to fermentation vats and writes them to the realtime database at set intervals.
-     Fermentation Monitoring & Alerting Module – Continuously evaluates incoming readings against ideal fermentation ranges, logs any out-of-range events, and triggers alerts when a batch needs attention.
-     Notification Module – Delivers real-time push notifications to the winemaker's device (via Firebase Cloud Messaging) whenever the monitoring module raises an alert.
-     Dashboard Module – Presents a real-time and historical view of each batch's fermentation status to the winemaker and staff, and lets staff log manual batch updates.
+### 1. Major Modules/Subsystems
 
-3. External Systems/Interfaces
-Firebase Realtime Database – stores live and historical sensor readings and alert logs.
-Firebase Authentication – manages user accounts and login sessions.
-Firebase Cloud Messaging (FCM) – third-party push notification service used to deliver alerts to the winemaker's phone.
-IoT Sensor Hardware (ESP32/Arduino + temperature, pH, and brix/hydrometer sensors) – external data source feeding readings into the system via REST API calls.
+- **Authentication Module** – Handles winemaker/staff login and role-based access using Firebase Authentication, so only authorized people can view or update fermentation batches.
 
-4. Data Flow Summary
-IoT sensors attached to each fermentation vat periodically send temperature, pH, and sugar/brix readings to the system's backend through REST calls. The Sensor Data Collection module stores each reading in the Fermentation Readings data store (Firebase Realtime Database). The Monitoring & Alerting module continuously reads the latest values, compares them against acceptable fermentation ranges, and — when a reading is out of range or a fermentation stage changes — logs the event to the Alerts Log and passes an alert trigger to the Notification module, which sends a push notification to the winemaker through FCM. Separately, the Authentication module verifies the winemaker's or staff's credentials against the User Accounts store before granting access to the Dashboard module, which pulls both current and historical readings and alerts to display batch status in real time, and accepts manual batch updates from staff.
+- **Sensor Data Collection Module** – Receives readings (temperature, pH, sugar/brix level) from IoT sensors attached to fermentation vats and writes them to the realtime database at set intervals.
+
+- **Fermentation Monitoring & Alerting Module** – Continuously evaluates incoming readings against ideal fermentation ranges, logs any out-of-range events, and triggers alerts when a batch needs attention.
+
+- **Notification Module** – Delivers real-time push notifications to the winemaker's device (via Firebase Cloud Messaging) whenever the monitoring module raises an alert.
+
+- **Dashboard Module** – Presents a real-time and historical view of each batch's fermentation status to the winemaker and staff, and lets staff log manual batch updates.
+
+### 3. External Systems/Interfaces
+
+- **Firebase Realtime Database** – Stores live and historical sensor readings and alert logs.
+
+- **Firebase Authentication** – Manages user accounts and login sessions.
+
+- **Firebase Cloud Messaging (FCM)** – Third-party push notification service used to deliver alerts to the winemaker's phone.
+
+- **IoT Sensor Hardware (ESP32/Arduino + temperature, pH, and brix/hydrometer sensors)** – External data source feeding readings into the system via REST API calls.
+
+### 4. Data Flow Summary
+
+IoT sensors attached to each fermentation vat periodically send temperature, pH, and sugar/brix readings to the system's backend through REST calls. The Sensor Data Collection Module stores each reading in the Fermentation Readings data store (Firebase Realtime Database). The Monitoring & Alerting Module continuously reads the latest values, compares them against acceptable fermentation ranges, and—when a reading is out of range or a fermentation stage changes—logs the event to the Alerts Log and passes an alert trigger to the Notification Module, which sends a push notification to the winemaker through FCM. Separately, the Authentication Module verifies the winemaker's or staff's credentials against the User Accounts store before granting access to the Dashboard Module. The Dashboard Module pulls both current and historical readings and alerts to display batch status in real time and accepts manual batch updates from staff.
 
