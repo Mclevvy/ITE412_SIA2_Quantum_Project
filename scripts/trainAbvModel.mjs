@@ -84,7 +84,7 @@ async function main() {
     trained_at: new Date().toISOString(),
     model_source: 'synthetic fermentation batches',
     calibration_target_abv: 12,
-    calibration_reference: [3.3, 24, 8, 5],
+    calibration_reference: [7.0, 24.0, 3.5, 6.0],
   };
 
   fs.writeFileSync(path.join(outDir, 'abvModelParams.json'), JSON.stringify(params, null, 2));

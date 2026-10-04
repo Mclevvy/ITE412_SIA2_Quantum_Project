@@ -1,22 +1,18 @@
 import { Navigate } from "react-router-dom";
-import { useEffect, useState } from "react";
-import { onAuthStateChanged, User } from "firebase/auth";
-import { auth } from "./lib/firebase"; 
+import type { ReactNode } from "react";
+import { useAuth } from "./lib/auth";
 
-export default function ProtectedRoute({ children }: { children: JSX.Element }) {
-  const [user, setUser] = useState<User | null>(null);
-  const [loading, setLoading] = useState(true);
+export default function ProtectedRoute({ children }: { children: ReactNode }) {
+  const { user, loading } = useAuth();
 
-  useEffect(() => {
-    const unsub = onAuthStateChanged(auth, (u) => {
-      setUser(u);
-      setLoading(false);
-    });
-    return () => unsub();
-  }, []);
-
-  if (loading) return null; // pwede mo lagyan loader
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-white">
+        <div className="animate-pulse text-gray-500">Loading…</div>
+      </div>
+    );
+  }
   if (!user) return <Navigate to="/" replace />;
 
-  return children;
+  return <>{children}</>;
 }

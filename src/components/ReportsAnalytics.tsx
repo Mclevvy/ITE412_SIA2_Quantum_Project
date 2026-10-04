@@ -39,7 +39,7 @@ import autoTable from "jspdf-autotable";
 import * as XLSX from "xlsx";
 
 import { db } from "../lib/firebase";
-import { ref, onValue, off, set } from "firebase/database";
+import { ref, onValue, set } from "firebase/database";
 
 type TabType = "weekly" | "monthly" | "seasonal";
 type ExportType = "pdf" | "excel" | "print";
@@ -48,6 +48,7 @@ export default function ReportsAnalytics() {
   const [activeTab, setActiveTab] = useState<TabType>("weekly");
   const [showExportMenu, setShowExportMenu] = useState(false);
   const [historicalData, setHistoricalData] = useState<any[]>([]);
+  const [hiddenInvalidCount, setHiddenInvalidCount] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
 
   // 1. FETCH ACTUAL FIREBASE HISTORY
@@ -58,22 +59,30 @@ export default function ReportsAnalytics() {
     }
 
     const historyRef = ref(db, 'fermentation/history');
-    onValue(historyRef, (snapshot) => {
+    const unsubscribe = onValue(historyRef, (snapshot) => {
       if (snapshot.exists()) {
         const data = snapshot.val();
         const formattedHistory = Object.keys(data).map(key => ({
           id: key,
           ...data[key]
-        })).sort((a, b) => a.completedAt - b.completedAt);
-        
-        setHistoricalData(formattedHistory);
+        })).sort((a, b) => (a.completedAt || 0) - (b.completedAt || 0));
+
+        // Drop malformed records (legacy/test/partial writes with no batchId)
+        // instead of rendering blank "Unknown" cards. The count is shown, and
+        // scripts/seedDemoBatch.mjs --clean-junk purges them for real.
+        const valid = formattedHistory.filter(
+          (b) => typeof b.batchId === "string" && b.batchId.trim() !== ""
+        );
+        setHiddenInvalidCount(formattedHistory.length - valid.length);
+        setHistoricalData(valid);
       } else {
         setHistoricalData([]);
+        setHiddenInvalidCount(0);
       }
       setIsLoading(false);
     });
 
-    return () => off(historyRef);
+    return () => unsubscribe();
   }, []);
 
   // ✅ ACTION: Clear all old test data
@@ -123,9 +132,12 @@ export default function ReportsAnalytics() {
   }, [historicalData]);
 
   // 3. DYNAMIC GRAPH DATA PROCESSING
+  // NOTE: batchId is guarded — a single legacy/test/partial history record
+  // without one used to throw inside render and blank the entire app (there
+  // was no error boundary). Unknown ids render as "Unknown" instead.
   const weeklyGraphData = useMemo(() => {
     return historicalData.slice(-7).map(batch => ({
-      batchId: batch.batchId.replace('Batch #', '#'),
+      batchId: String(batch.batchId ?? "Unknown").replace('Batch #', '#'),
       temperature: parseFloat(batch.averageTemp) || 0,
       sugar: parseFloat(batch.targetBrixAchieved) || 0,
       ph: parseFloat(batch.averagePh) || 0
@@ -136,7 +148,7 @@ export default function ReportsAnalytics() {
     return historicalData.slice(-10).map(batch => {
        const match = String(batch.finalYield).match(/\d+(\.\d+)?/);
        return {
-         batchId: batch.batchId.replace('Batch #', '#'),
+         batchId: String(batch.batchId ?? "Unknown").replace('Batch #', '#'),
          yield: match ? parseFloat(match[0]) : 0
        };
     });
@@ -229,7 +241,7 @@ export default function ReportsAnalytics() {
       rows: filteredHistory.map((item) => [
         item.batchId,
         item.startDate || "Unknown",
-        new Date(item.completedAt).toLocaleDateString(),
+        typeof item.completedAt === "number" ? new Date(item.completedAt).toLocaleDateString() : "Unknown",
         item.finalYield || "Unknown",
         item.fruitsUsed || "Unknown",
         `${item.averageTemp}°C`,
@@ -520,6 +532,9 @@ export default function ReportsAnalytics() {
           </h2>
           <p className="text-xs text-gray-500 mb-2">
             Showing {filteredHistory.length} of {historicalData.length} completed batches.
+            {hiddenInvalidCount > 0 && (
+              <> · {hiddenInvalidCount} invalid record{hiddenInvalidCount === 1 ? "" : "s"} hidden</>
+            )}
           </p>
 
           {/* FILTER BAR */}
@@ -614,8 +629,8 @@ export default function ReportsAnalytics() {
                      <div className="flex justify-between items-start mb-3">
                        <div>
                          <p className="font-bold text-sm text-gray-900">{report.batchId}</p>
-                         <p className="text-xs text-gray-500">Started: {report.startDate || "Unknown"}</p>
-                         <p className="text-xs text-gray-500">Completed: {new Date(report.completedAt).toLocaleDateString()}</p>
+                          <p className="text-xs text-gray-500">Started: {report.startDate || "Unknown"}</p>
+                          <p className="text-xs text-gray-500">Completed: {typeof report.completedAt === "number" ? new Date(report.completedAt).toLocaleDateString() : "Unknown"}</p>
                        </div>
                        <div className="flex flex-col items-end gap-1">
                          <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200">

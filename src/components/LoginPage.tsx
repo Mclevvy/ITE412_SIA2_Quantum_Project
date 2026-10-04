@@ -5,6 +5,7 @@ import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 import { ImageWithFallback } from "./figma/ImageWithFallback";
 import { Eye, EyeOff } from "lucide-react";
+import fermaLogo from "../assets/fermalogo.png";
 
 import { signInWithEmailAndPassword, sendPasswordResetEmail } from "firebase/auth";
 import { auth } from "../lib/firebase"; 
@@ -21,8 +22,8 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
   const [err, setErr] = useState<string | null>(null);
   const [showPassword, setShowPassword] = useState(false);
 
-  // Added your working ImgBB direct link
-  const logoUrl = "https://i.ibb.co/psTtv5x/logo.png";
+  // Brand mark is bundled (src/assets/fermalogo.png) — the old ImgBB remote
+  // URL is dead, so nothing here depends on the network.
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -78,7 +79,7 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
           <div className="text-center mb-8">
             <div className="inline-flex items-center justify-center mb-4">
               <img
-                src={logoUrl}
+                src={fermaLogo}
                 alt="Project FERMA Logo"
                 className="w-48 h-48 object-contain filter drop-shadow-2xl"
               />

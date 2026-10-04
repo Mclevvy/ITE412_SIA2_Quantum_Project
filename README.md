@@ -30,15 +30,32 @@ The `notification` fields are used by FCM/APNs for background delivery. The `dat
 
 ## Firebase setup required for real device delivery
 
-- **Android:** add the Firebase project's `google-services.json` to `android/app/`, then run `npx cap sync android`. The application id is `com.buniussense.app`.
+- **Android:** add the Firebase project's `google-services.json` to `android/app/`, then run `npx cap sync android`. The application id is `com.ferma.app` (see `capacitor.config.json`).
 - **iOS:** add the Firebase project's `GoogleService-Info.plist` to the iOS app target in Xcode, enable the **Push Notifications** capability and **Background Modes > Remote notifications**, and configure an APNs key/certificate in Firebase.
 - The Firebase Realtime Database rules must allow an authenticated user to write only their own token path and read notification records needed by the app.
+- The app also reads/writes these paths — each needs an explicit stanza (the root
+  defaults to deny, so a missing stanza silently breaks the feature with no error
+  in the UI). Without `deviceStatus`, every device reads permanently offline;
+  without `deviceControl`, the enable/disable toggles fail; without
+  `sensorArchive`, End Batch archiving and demo seeding fail:
+
+```json
+{
+  "rules": {
+    "sensorArchive": { ".read": true, ".write": true },
+    "deviceControl": { ".read": true, ".write": true },
+    "deviceStatus": { ".read": true, ".write": true }
+  }
+}
+```
 
 ## Run and build
 
 ```bash
 npm install
+cp .env.example .env   # fill in Firebase web config (Vite reads VITE_* vars)
 npm run dev
+npm run typecheck
 npm run build
 npx cap sync
 npx cap open android

@@ -5,6 +5,10 @@ build - Copy
 .env
 .env.*
 !.env.example
+# Personal VPN/cert scripts — credentials, never commit
+w.bat
+*.p12
+netshare.p12
 android/.gradle
 android/build
 android/app/build

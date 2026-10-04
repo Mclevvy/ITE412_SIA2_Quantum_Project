@@ -1,42 +1,88 @@
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
-import { useEffect, useState } from "react";
-import { onAuthStateChanged, User } from "firebase/auth";
+import { BrowserRouter, Routes, Route, Navigate, useNavigate, useParams } from "react-router-dom";
+import { Suspense, lazy, useEffect, useState } from "react";
+import type { ReactNode } from "react";
 
 import LoginPage from "./components/LoginPage";
 import Dashboard from "./components/Dashboard";
-import FruitSorting from "./components/FruitSorting";
-import FermentationTracker from "./components/FermentationTracker";
-import NotificationCenter from "./components/NotificationCenter";
-import ReportsAnalytics from "./components/ReportsAnalytics";
-import PredictiveInsights from "./components/PredictiveInsights";
-import DeviceControl from "./components/DeviceControl";
 import Navigation from "./components/Navigation";
-// ADDED: Import the new Bottle Filling Page
-import BottleFillingPage from "./components/BottleFillingPage"; 
+import { ErrorBoundary } from "./components/ErrorBoundary";
+import { PinSetup, PinUnlock, PinManage } from "./components/PinLock";
 
-import { auth } from "./lib/firebase";
+import { AuthProvider, useAuth } from "./lib/auth";
+import ProtectedRoute from "./ProtectedRoute";
+import { hasPin, wasPinSkipped } from "./lib/pinLock";
 import { initializePushNotifications } from "./lib/pushNotifications";
 
-function ProtectedRoute({ children }: { children: JSX.Element }) {
-  const [user, setUser] = useState<User | null>(null);
-  const [loading, setLoading] = useState(true);
+const FruitSorting = lazy(() => import("./components/FruitSorting"));
+const FermentationTracker = lazy(() => import("./components/FermentationTracker"));
+const BottleFillingPage = lazy(() => import("./components/BottleFillingPage"));
+const NotificationCenter = lazy(() => import("./components/NotificationCenter"));
+const ReportsAnalytics = lazy(() => import("./components/ReportsAnalytics"));
+const PredictiveInsights = lazy(() => import("./components/PredictiveInsights"));
+const DeviceControl = lazy(() => import("./components/DeviceControl"));
+
+export const VALID_SCREENS = [
+  "dashboard",
+  "sorting",
+  "fermentation",
+  "filling",
+  "notifications",
+  "reports",
+  "insights",
+  "devices",
+] as const;
+
+export type ScreenId = (typeof VALID_SCREENS)[number];
+
+function isScreenId(value: string | undefined): value is ScreenId {
+  return (VALID_SCREENS as readonly string[]).includes(value ?? "");
+}
+
+/**
+ * Device-PIN gate around the authenticated app. First launch after sign-in
+ * offers PIN setup (once); every later launch with a live Firebase session
+ * asks for the PIN instead of the password. The unlock lives only in memory,
+ * so it naturally resets on sign-out or full restart. PIN changes made from
+ * the More sheet notify via the "bunius:pin-changed" window event.
+ */
+function AuthedGate({ children }: { children: ReactNode }) {
+  const [unlocked, setUnlocked] = useState(false);
+  const [pinKnown, setPinKnown] = useState(() => hasPin());
 
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, (u) => {
-      setUser(u);
-      setLoading(false);
-    });
-    return () => unsub();
+    const refresh = () => setPinKnown(hasPin());
+    window.addEventListener("bunius:pin-changed", refresh);
+    return () => window.removeEventListener("bunius:pin-changed", refresh);
   }, []);
 
-  if (loading) return null;
-  if (!user) return <Navigate to="/" replace />;
-
-  return children;
+  if (pinKnown && !unlocked) {
+    return <PinUnlock onUnlock={() => setUnlocked(true)} />;
+  }
+  if (!pinKnown && !wasPinSkipped()) {
+    return (
+      <PinSetup
+        onDone={(created) => {
+          setPinKnown(hasPin());
+          if (created) setUnlocked(true);
+        }}
+      />
+    );
+  }
+  return <>{children}</>;
 }
 
 function MainLayout() {
-  const [currentScreen, setCurrentScreen] = useState("dashboard");
+  const { screen } = useParams<{ screen?: string }>();
+  const navigate = useNavigate();
+  const { user } = useAuth();
+
+  const currentScreen: ScreenId = isScreenId(screen) ? screen : "dashboard";
+
+  useEffect(() => {
+    if (screen !== undefined && !isScreenId(screen)) {
+      navigate("/app/dashboard", { replace: true });
+    }
+  }, [screen, navigate]);
 
   useEffect(() => {
     let cleanup: (() => Promise<void>) | undefined;
@@ -62,57 +108,82 @@ function MainLayout() {
     };
   }, []);
 
-  return (
-    <div className="min-h-screen bg-white">
-      <div className="w-full bg-white min-h-screen pb-20">
-        {/* Conditional Rendering based on currentScreen state */}
-        {currentScreen === "dashboard" && (
-          <Dashboard userRole={auth.currentUser?.email ?? "User"} />
-        )}
-        {currentScreen === "sorting" && <FruitSorting />}
-        {currentScreen === "fermentation" && <FermentationTracker />}
-        {/* ADDED: The new Bottle Filling render condition */}
-        {currentScreen === "filling" && <BottleFillingPage />} 
-        {currentScreen === "notifications" && <NotificationCenter />}
-        {currentScreen === "reports" && <ReportsAnalytics />}
-        {currentScreen === "insights" && <PredictiveInsights />}
-        {currentScreen === "devices" && <DeviceControl />}
+  const goToScreen = (next: string) => {
+    if (next !== currentScreen) navigate(`/app/${next}`);
+  };
 
-        <Navigation
-          currentScreen={currentScreen}
-          setCurrentScreen={setCurrentScreen}
-        />
+  const [pinManageOpen, setPinManageOpen] = useState(false);
+
+  const closePinManage = () => {
+    setPinManageOpen(false);
+    window.dispatchEvent(new Event("bunius:pin-changed"));
+  };
+
+  return (
+    <div className="min-h-screen bg-[#FAF6F1]">
+      <div className="w-full bg-[#FAF6F1] min-h-screen pb-20">
+        <Suspense
+          fallback={
+            <div className="flex items-center justify-center py-24 text-gray-500 animate-pulse">
+              Loading…
+            </div>
+          }
+        >
+          {/* Per-screen boundary (keyed): a crash or failed chunk load in one
+              tab shows a recoverable message instead of blanking the app. */}
+          <ErrorBoundary key={currentScreen} screenName={currentScreen}>
+            {currentScreen === "dashboard" && <Dashboard userRole={user?.email ?? "User"} />}
+            {currentScreen === "sorting" && <FruitSorting />}
+            {currentScreen === "fermentation" && <FermentationTracker />}
+            {currentScreen === "filling" && <BottleFillingPage />}
+            {currentScreen === "notifications" && <NotificationCenter />}
+            {currentScreen === "reports" && <ReportsAnalytics />}
+            {currentScreen === "insights" && <PredictiveInsights />}
+            {currentScreen === "devices" && <DeviceControl />}
+          </ErrorBoundary>
+        </Suspense>
+
+        <Navigation currentScreen={currentScreen} onNavigate={goToScreen} onManagePin={() => setPinManageOpen(true)} />
+
+        {pinManageOpen && (
+          <div className="fixed inset-0 z-[60] overflow-y-auto">
+            <PinManage onDone={closePinManage} />
+          </div>
+        )}
       </div>
     </div>
   );
 }
 
+function LoginRoute() {
+  const { user, loading } = useAuth();
+  const navigate = useNavigate();
+
+  if (!loading && user) return <Navigate to="/app/dashboard" replace />;
+  return <LoginPage onLogin={() => navigate("/app/dashboard", { replace: true })} />;
+}
+
 export default function App() {
   return (
     <BrowserRouter>
-      <Routes>
-        {/* LOGIN */}
-        <Route
-          path="/"
-          element={
-            <LoginPage
-              onLogin={() => {
-                window.location.replace("/dashboard");
-              }}
-            />
-          }
-        />
-
-        {/* DASHBOARD + APP */}
-        <Route
-          path="/dashboard"
-          element={
-            <ProtectedRoute>
-              <MainLayout />
-            </ProtectedRoute>
-          }
-        />
-      </Routes>
+      <AuthProvider>
+        <Routes>
+          <Route path="/" element={<LoginRoute />} />
+          {/* Backwards compatibility with the old single dashboard path. */}
+          <Route path="/dashboard" element={<Navigate to="/app/dashboard" replace />} />
+          <Route
+            path="/app/:screen?"
+            element={
+              <ProtectedRoute>
+                <AuthedGate>
+                  <MainLayout />
+                </AuthedGate>
+              </ProtectedRoute>
+            }
+          />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </AuthProvider>
     </BrowserRouter>
   );
 }

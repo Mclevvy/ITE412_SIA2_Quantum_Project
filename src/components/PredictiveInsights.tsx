@@ -17,8 +17,8 @@ import * as tf from '@tensorflow/tfjs';
 import { db } from '../lib/firebase';
 import { ref, onValue, get, set } from 'firebase/database';
 import { computeLiveAbvFeatures } from '../lib/abvFeatures';
-import { predictAbv, getModelInfo } from '../lib/abvModel';
 
+import { predictAbv, getModelInfo, predictAbvFromBrixDrop, resolveInitialBrix } from '../lib/abvModel';
 const SCALING = {
   brix: { min: 0, max: 30 },
   temp: { min: 15, max: 40 },
@@ -55,6 +55,7 @@ export default function PredictiveInsights() {
   // NEW: ABV prediction state (edge Ridge model — see src/lib/abvModel.ts)
   const [predAbv, setPredAbv] = useState<number | null>(null);
   const [abvHistoryReady, setAbvHistoryReady] = useState(false);
+  const [abvBasis, setAbvBasis] = useState<'measured' | 'estimated'>('estimated');
   const [abvModelInfo] = useState(() => getModelInfo());
 
   // Refs so the ABV prediction effect (below) can read the LATEST
@@ -161,11 +162,36 @@ export default function PredictiveInsights() {
 
     async function runAbvPrediction() {
       try {
-        const [phSnap, tempSnap, pressureSnap] = await Promise.all([
+        const [phSnap, tempSnap, pressureSnap, sugarSnap] = await Promise.all([
           get(ref(db, 'sensors/history/ph')),
           get(ref(db, 'sensors/history/temperature')),
           get(ref(db, 'sensors/history/pressurePSI')),
+          get(ref(db, 'sensors/sugar/current')),
         ]);
+
+        // Chemistry first: with OG on record and a current Brix reading,
+        // ABV is arithmetic — not a model guess. Same formula the batch-end
+        // accuracy check uses, so prediction and actual stay consistent.
+        const ogBrix = resolveInitialBrix(batchDetails);
+        const currentBrixRaw = sugarSnap.exists() ? sugarSnap.val()?.brix : null;
+        const currentBrixNum =
+          typeof currentBrixRaw === 'number' && Number.isFinite(currentBrixRaw) ? currentBrixRaw : null;
+        const chemistryAbv = predictAbvFromBrixDrop(ogBrix, currentBrixNum);
+        if (chemistryAbv !== null) {
+          if (cancelled) return;
+          setAbvHistoryReady(true);
+          setAbvBasis('measured');
+          setPredAbv(chemistryAbv);
+          const { predDays: latestDays, predQuality: latestQuality, predRisk: latestRisk } = latestFastPredictionsRef.current;
+          await set(ref(db, 'fermentation/currentBatch/aiPrediction'), {
+            capturedAt: Date.now(),
+            predictedDaysRemaining: latestDays,
+            predictedQualityPercent: latestQuality,
+            predictedRiskPercent: latestRisk,
+            predictedAbv: chemistryAbv,
+          });
+          return;
+        }
 
         const hasHistory = [phSnap, tempSnap, pressureSnap].every((snapshot) => {
           const value = snapshot.val();
@@ -177,6 +203,7 @@ export default function PredictiveInsights() {
           return;
         }
         setAbvHistoryReady(true);
+        setAbvBasis('estimated');
 
         const features = computeLiveAbvFeatures(
           phSnap.exists() ? phSnap.val() : null,
@@ -254,17 +281,23 @@ export default function PredictiveInsights() {
   let abvPrediction = "Calculating...";
   let abvStatus = 'pending';
   let abvConfidence: number | null = null;
+  let abvDetails = 'From pH/temperature/pressure fermentation trend';
   if (!abvHistoryReady) {
     abvPrediction = 'Collecting sensor history...';
   }
   if (predAbv !== null) {
-    const cappedAbv = Math.min(20, Math.max(0, predAbv));
+    const cappedAbv = Math.min(25, Math.max(0, predAbv));
     abvPrediction = `~${cappedAbv.toFixed(1)}% ABV`;
     abvStatus = 'good';
-    abvConfidence = 65;
-    if (cappedAbv > 12) {
-      abvStatus = 'warning';
-      abvConfidence = 58;
+    if (abvBasis === 'measured') {
+      abvConfidence = 90;
+      abvDetails = 'From sugar drop (starting Brix − current Brix)';
+    } else {
+      abvConfidence = 65;
+      if (cappedAbv > 12) {
+        abvStatus = 'warning';
+        abvConfidence = 58;
+      }
     }
   }
 
@@ -316,7 +349,7 @@ export default function PredictiveInsights() {
       confidence: abvConfidence,
       status: abvStatus,
       icon: FlaskConicalIcon,
-      details: 'From pH/temperature/pressure fermentation trend',
+      details: abvDetails,
       color: 'from-amber-500 to-orange-600',
     },
   ];

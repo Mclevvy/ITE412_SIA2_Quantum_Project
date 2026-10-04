@@ -15,7 +15,7 @@ import {
 import { motion, AnimatePresence } from 'motion/react'; // ✅ Imported Framer Motion
 
 import { db } from '../lib/firebase';
-import { ref, onValue, off, set, remove } from 'firebase/database'; // ✅ Added 'remove'
+import { ref, onValue, set, remove } from 'firebase/database'; // ✅ Added 'remove'
 
 const iconMap: Record<string, any> = {
   ThermometerIcon,
@@ -52,7 +52,7 @@ export default function NotificationCenter() {
     const ONE_DAY_MS = 24 * 60 * 60 * 1000;
     const cutoffTimestamp = Date.now() - ONE_DAY_MS;
 
-    onValue(notificationsRef, (snapshot) => {
+    const unsubscribe = onValue(notificationsRef, (snapshot) => {
       const data = snapshot.val();
       if (data) {
         const formattedData: AppNotification[] = Object.keys(data)
@@ -66,7 +66,7 @@ export default function NotificationCenter() {
       }
     });
 
-    return () => off(notificationsRef);
+    return () => unsubscribe();
   }, []);
 
   const unreadCount = notifications.filter(n => n.unread).length;

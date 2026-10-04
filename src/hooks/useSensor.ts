@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState } from "react";
 import { db } from "../lib/firebase";
 import {
   Database,
-  off,
   onValue,
   query,
   ref,
@@ -50,28 +49,35 @@ export function useSensors() {
 
     const database: Database = db;
 
+    // onValue returns an unsubscribe function — collect them so cleanup
+    // detaches the exact listener (including limitToLast queries, which a
+    // fresh ref() to the same path would NOT remove).
+    const unsubscribers: Array<() => void> = [];
+
     // CURRENT
     const currentRef = ref(database, "sensors/current");
 
-    onValue(
-      currentRef,
-      (snap) => {
-        const v = snap.val();
-        if (!v) {
-          setIsLive(false);
-          setCurrent({ temperature: null, sugarBrix: null, ph: null, updatedAt: null });
-          return;
-        }
+    unsubscribers.push(
+      onValue(
+        currentRef,
+        (snap) => {
+          const v = snap.val();
+          if (!v) {
+            setIsLive(false);
+            setCurrent({ temperature: null, sugarBrix: null, ph: null, updatedAt: null });
+            return;
+          }
 
-        setIsLive(true);
-        setCurrent({
-          temperature: typeof v.temperature === "number" ? v.temperature : null,
-          sugarBrix: typeof v.sugarBrix === "number" ? v.sugarBrix : null,
-          ph: typeof v.ph === "number" ? v.ph : null,
-          updatedAt: typeof v.updatedAt === "number" ? v.updatedAt : Date.now(),
-        });
-      },
-      () => setIsLive(false)
+          setIsLive(true);
+          setCurrent({
+            temperature: typeof v.temperature === "number" ? v.temperature : null,
+            sugarBrix: typeof v.sugarBrix === "number" ? v.sugarBrix : null,
+            ph: typeof v.ph === "number" ? v.ph : null,
+            updatedAt: typeof v.updatedAt === "number" ? v.updatedAt : Date.now(),
+          });
+        },
+        () => setIsLive(false)
+      )
     );
 
     // HISTORY (last 30)
@@ -79,22 +85,25 @@ export function useSensors() {
     const brixQ = query(ref(database, "sensors/history/sugarBrix"), limitToLast(30));
     const phQ = query(ref(database, "sensors/history/ph"), limitToLast(30));
 
-    onValue(tempQ, (snap) =>
-      setHistory((h) => ({ ...h, temperature: toPoints(snap.val()) }))
+    unsubscribers.push(
+      onValue(tempQ, (snap) =>
+        setHistory((h) => ({ ...h, temperature: toPoints(snap.val()) }))
+      )
     );
-    onValue(brixQ, (snap) =>
-      setHistory((h) => ({ ...h, sugarBrix: toPoints(snap.val()) }))
+    unsubscribers.push(
+      onValue(brixQ, (snap) =>
+        setHistory((h) => ({ ...h, sugarBrix: toPoints(snap.val()) }))
+      )
     );
-    onValue(phQ, (snap) =>
-      setHistory((h) => ({ ...h, ph: toPoints(snap.val()) }))
+    unsubscribers.push(
+      onValue(phQ, (snap) =>
+        setHistory((h) => ({ ...h, ph: toPoints(snap.val()) }))
+      )
     );
 
     // CLEANUP
     return () => {
-      off(currentRef);
-      off(ref(database, "sensors/history/temperature"));
-      off(ref(database, "sensors/history/sugarBrix"));
-      off(ref(database, "sensors/history/ph"));
+      unsubscribers.forEach((unsub) => unsub());
     };
   }, []);
 

@@ -20,6 +20,7 @@ import {
 import * as tf from '@tensorflow/tfjs';
 import { db } from '../lib/firebase';
 import { ref, onValue, set, push } from 'firebase/database';
+import OgCalculator from './OgCalculator';
 
 // 1. SCALING CONSTANTS (Matches Python Exactly)
 const SCALING = {
@@ -44,7 +45,7 @@ export default function FermentationTracker() {
   const [estDate, setEstDate] = useState<string>("--");
   
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [newBatch, setNewBatch] = useState({ volume: '', fruits: '', targetBrix: '2.0' });
+  const [newBatch, setNewBatch] = useState({ volume: '', fruits: '', targetBrix: '2.0', initialBrix: '' });
 
   // 1. LOAD THE 50k MASTER AI MODEL
   useEffect(() => {
@@ -157,7 +158,9 @@ export default function FermentationTracker() {
         initialVolume: `${newBatch.volume}L`,
         fruitsUsed: `${newBatch.fruits}kg`,
         targetBrix: Number(newBatch.targetBrix),
-        startDate: new Date().toLocaleDateString()
+        initialBrix: Number(newBatch.initialBrix),
+        startDate: new Date().toLocaleDateString(),
+        startedAt: Date.now()
       },
       stages: [
         { id: 1, name: 'Sorting', status: 'completed', date: new Date().toLocaleDateString() },
@@ -333,7 +336,9 @@ export default function FermentationTracker() {
             <form onSubmit={startBatch} className="space-y-4">
               <Input required type="number" placeholder="Must Volume (Liters)" onChange={e => setNewBatch({...newBatch, volume: e.target.value})} />
               <Input required type="number" placeholder="Fruit Weight (kg)" onChange={e => setNewBatch({...newBatch, fruits: e.target.value})} />
+              <Input required type="number" step="0.1" min="0" max="40" placeholder="Starting Brix (OG) e.g. 30" value={newBatch.initialBrix} onChange={e => setNewBatch({...newBatch, initialBrix: e.target.value})} />
               <Input required type="number" step="0.1" placeholder="Target Brix" value={newBatch.targetBrix} onChange={e => setNewBatch({...newBatch, targetBrix: e.target.value})} />
+              <OgCalculator onApply={(og) => setNewBatch((b) => ({ ...b, initialBrix: String(og) }))} />
               <Button type="submit" className="w-full bg-[#8B1538] py-6">Start Production</Button>
             </form>
           </Card>

@@ -8,11 +8,14 @@ import {
   CpuIcon,
   MenuIcon,
   DropletsIcon,
-  LogOutIcon // <-- Added the logout icon
+  LogOutIcon, // <-- Added the logout icon
+  LockIcon
 } from 'lucide-react';
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTrigger, SheetClose } from './ui/sheet';
 import { Button } from './ui/button';
 import Logo from './Logo';
+import { useNavigate } from 'react-router-dom';
+import { hasPin } from '../lib/pinLock';
 
 // Import Firebase Authentication functions
 import { signOut } from "firebase/auth";
@@ -20,10 +23,12 @@ import { auth } from "../lib/firebase"; // Adjust path to your firebase config i
 
 interface NavigationProps {
   currentScreen: string;
-  setCurrentScreen: (screen: string) => void;
+  onNavigate: (screen: string) => void;
+  onManagePin: () => void;
 }
 
-export default function Navigation({ currentScreen, setCurrentScreen }: NavigationProps) {
+export default function Navigation({ currentScreen, onNavigate, onManagePin }: NavigationProps) {
+  const navigate = useNavigate();
   const mainNavItems = [
     { id: 'dashboard', icon: HomeIcon, label: 'Home' },
     { id: 'sorting', icon: ScanLineIcon, label: 'Sorting' },
@@ -45,8 +50,8 @@ export default function Navigation({ currentScreen, setCurrentScreen }: Navigati
   const handleLogout = () => {
     signOut(auth).then(() => {
       // Successfully destroyed the Firebase session token
-      // Redirect the user back to the root login page
-      window.location.replace("/"); 
+      // SPA navigation keeps the app shell alive instead of a full reload.
+      navigate("/", { replace: true });
     }).catch((error) => {
       console.error("Error logging out:", error);
     });
@@ -55,8 +60,8 @@ export default function Navigation({ currentScreen, setCurrentScreen }: Navigati
   return (
     <>
       {/* Bottom Navigation */}
-      <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 z-50">
-        <div className="w-full">
+      <div className="fixed bottom-0 left-0 right-0 bg-[#FAF6F1]/90 backdrop-blur-md border-t border-[#8B1538]/10 z-50">
+        <div className="w-full max-w-xl mx-auto">
           <div className="flex items-center justify-around p-2">
             {mainNavItems.map((item) => {
               const Icon = item.icon;
@@ -65,9 +70,9 @@ export default function Navigation({ currentScreen, setCurrentScreen }: Navigati
               return (
                 <button
                   key={item.id}
-                  onClick={() => setCurrentScreen(item.id)}
-                  className={`flex flex-col items-center justify-center p-2 rounded-lg min-w-[70px] transition-colors ${
-                    isActive ? 'text-[#8B1538]' : 'text-gray-500'
+                  onClick={() => onNavigate(item.id)}
+                  className={`flex flex-col items-center justify-center px-3 py-2 rounded-2xl min-w-[70px] transition-all ${
+                    isActive ? 'text-[#8B1538] bg-[#8B1538]/10' : 'text-gray-500 hover:text-gray-700'
                   }`}
                 >
                   <Icon className={`w-6 h-6 mb-1 ${isActive ? 'fill-[#8B1538]' : ''}`} />
@@ -79,13 +84,13 @@ export default function Navigation({ currentScreen, setCurrentScreen }: Navigati
             {/* Menu Sheet Trigger */}
             <Sheet>
               <SheetTrigger asChild>
-                <button className="flex flex-col items-center justify-center p-2 rounded-lg min-w-[70px] text-gray-500 hover:text-[#8B1538] transition-colors">
+                <button className="flex flex-col items-center justify-center px-3 py-2 rounded-2xl min-w-[70px] text-gray-500 hover:text-[#8B1538] transition-colors">
                   <MenuIcon className="w-6 h-6 mb-1" />
                   <span className="text-xs">More</span>
                 </button>
               </SheetTrigger>
               
-              <SheetContent side="bottom" className="max-w-md mx-auto rounded-t-3xl max-h-[90vh] overflow-y-auto">
+              <SheetContent side="bottom" className="max-w-md mx-auto rounded-t-3xl max-h-[90vh] overflow-y-auto px-4 sm:px-6 pb-5">
                 <SheetHeader className="flex flex-col items-center">
                   <Logo size="md" className="mb-2" />
                   <SheetTitle>All Features</SheetTitle>
@@ -104,12 +109,12 @@ export default function Navigation({ currentScreen, setCurrentScreen }: Navigati
                       <SheetClose asChild key={item.id}>
                         <Button
                           variant={isActive ? "default" : "outline"}
-                          className={`h-auto py-4 flex flex-col gap-2 ${
+                          className={`h-auto min-h-[92px] py-4 flex flex-col items-center justify-center gap-2 text-center leading-tight ${
                             isActive ? 'bg-[#8B1538] hover:bg-[#6B1028] text-white' : 'hover:bg-gray-50'
                           }`}
-                          onClick={() => setCurrentScreen(item.id)}
+                          onClick={() => onNavigate(item.id)}
                         >
-                          <Icon className="w-6 h-6" />
+                          <Icon className="w-6 h-6 shrink-0" />
                           <span className="text-xs">{item.label}</span>
                         </Button>
                       </SheetClose>
@@ -118,7 +123,7 @@ export default function Navigation({ currentScreen, setCurrentScreen }: Navigati
                 </div>
 
                 {/* SIGN OUT BUTTON SECTION */}
-                <div className="mt-2 pt-4 border-t border-gray-100 pb-6">
+                <div className="mt-2 pt-4 border-t border-gray-100 pb-2">
                   <Button
                     variant="outline"
                     className="w-full py-6 text-red-600 border-red-100 hover:bg-red-50 hover:text-red-700 transition-colors"
@@ -127,9 +132,21 @@ export default function Navigation({ currentScreen, setCurrentScreen }: Navigati
                     <LogOutIcon className="w-5 h-5 mr-2" />
                     Sign Out
                   </Button>
-                  <p className="text-center text-xs text-gray-400 mt-3">
-                    Logged in securely via Firebase
-                  </p>
+                  <SheetClose asChild>
+                    <Button
+                      variant="ghost"
+                      className="w-full mt-1 text-gray-600 hover:text-[#8B1538] justify-between rounded-2xl"
+                      onClick={onManagePin}
+                    >
+                      <span className="flex items-center gap-2">
+                        <LockIcon className="w-4 h-4" />
+                        App PIN
+                      </span>
+                      <span className={`text-xs font-semibold ${hasPin() ? 'text-green-700' : 'text-gray-400'}`}>
+                        {hasPin() ? 'On' : 'Off'}
+                      </span>
+                    </Button>
+                  </SheetClose>
                 </div>
 
               </SheetContent>

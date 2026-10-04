@@ -37,7 +37,7 @@ function notificationFromPush(push: PushNotificationSchema): LocalNotificationSc
 
 async function saveDeviceToken(token: Token) {
   const user = auth.currentUser;
-  console.log('[push] saveDeviceToken called, user:', user?.uid ?? 'NO USER LOGGED IN');
+  if (import.meta.env.DEV) console.log('[push] saveDeviceToken called, user:', user?.uid ?? 'NO USER LOGGED IN');
   if (!user || !db) {
     console.warn('[push] cannot save token — user or db missing', { hasUser: !!user, hasDb: !!db });
     return;
@@ -51,19 +51,19 @@ async function saveDeviceToken(token: Token) {
 }
 
 async function actuallyInitializePushNotifications(): Promise<() => Promise<void>> {
-  console.log('[push] init started');
+  if (import.meta.env.DEV) console.log('[push] init started');
 
   if (!Capacitor.isNativePlatform()) {
-    console.log('[push] not native platform, skipping');
+    if (import.meta.env.DEV) console.log('[push] not native platform, skipping');
     return async () => undefined;
   }
 
   const permission = await PushNotifications.checkPermissions();
-  console.log('[push] current permission:', permission.receive);
+  if (import.meta.env.DEV) console.log('[push] current permission:', permission.receive);
 
   if (permission.receive !== 'granted') {
     const requested = await PushNotifications.requestPermissions();
-    console.log('[push] requested permission result:', requested.receive);
+    if (import.meta.env.DEV) console.log('[push] requested permission result:', requested.receive);
     if (requested.receive !== 'granted') {
       console.warn('[push] permission denied, aborting');
       return async () => undefined;
@@ -76,10 +76,10 @@ async function actuallyInitializePushNotifications(): Promise<() => Promise<void
   }
 
   const registration = await PushNotifications.addListener('registration', async (token) => {
-    console.log('[push] registration event fired, token:', token.value.substring(0, 20) + '...');
+    if (import.meta.env.DEV) console.log('[push] registration event fired, token:', token.value.substring(0, 20) + '...');
     try {
       await saveDeviceToken(token);
-      console.log('[push] token saved to Firebase successfully');
+      if (import.meta.env.DEV) console.log('[push] token saved to Firebase successfully');
     } catch (error) {
       console.error('[push] FAILED to save token to Firebase:', error);
     }
@@ -100,9 +100,9 @@ async function actuallyInitializePushNotifications(): Promise<() => Promise<void
     },
   );
 
-  console.log('[push] calling PushNotifications.register()...');
+  if (import.meta.env.DEV) console.log('[push] calling PushNotifications.register()...');
   await PushNotifications.register();
-  console.log('[push] register() call completed');
+  if (import.meta.env.DEV) console.log('[push] register() call completed');
 
   // Note: listeners are intentionally never removed here. Since this only
   // ever runs once per app lifetime (guarded below), there's nothing to

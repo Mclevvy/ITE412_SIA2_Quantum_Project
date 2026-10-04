@@ -1,19 +1,20 @@
 {
   "feature_columns": [
-    "summary_average_ph",
+    "days_since_start",
     "summary_average_temp",
-    "summary_average_pressure_psi",
-    "days_since_start"
+    "summary_average_ph",
+    "summary_average_pressure_psi"
   ],
-  "impute_medians": [3.3, 24, 8, 5],
-  "scale_mean": [3.3, 24, 8, 5],
-  "scale_scale": [0.8, 10, 8, 4],
-  "coef": [0.9, 0.5, 0.4, 0.7],
-  "intercept": 0.8,
+  "impute_medians": [3.0, 24.0, 3.5, 6.0],
+  "scale_mean": [7.0, 24.0, 3.6, 6.0],
+  "scale_scale": [5.0, 8.0, 0.7, 5.0],
+  "coef": [0.5, 0.25, -0.38, 0.18],
+  "intercept": 1.2,
   "brix_to_abv_factor": 0.59,
   "og_brix_assumed": 22,
-  "n_training_samples": 180,
+  "n_training_samples": 2400,
   "trained_at": "2026-09-20T00:00:00.000Z",
+  "model_source": "synthetic fermentation batches",
   "calibration_target_abv": 12,
-  "calibration_reference": [3.3, 24, 8, 5]
+  "calibration_reference": [7.0, 24.0, 3.5, 6.0]
 }

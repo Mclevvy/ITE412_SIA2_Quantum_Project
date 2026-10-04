@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from "react";
-import { ref, onValue, update, push, serverTimestamp } from "firebase/database";
+import { ref, onValue, get, update, push, serverTimestamp } from "firebase/database";
 import { db } from "../lib/firebase";
 
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
@@ -38,6 +38,24 @@ interface Device {
 
 const DEVICE_PORTAL_BASE = "http://192.168.4.1";
 const OFFLINE_TIMEOUT_MS = 70000;
+
+/**
+ * ESP32 firmware commonly writes heartbeats as Unix SECONDS (time()), while
+ * the web app compares against Date.now() MILLISECONDS. Comparing seconds
+ * against ms always exceeds the timeout, so every device reads permanently
+ * "offline" even with live sensor values flowing. Normalize both units here.
+ */
+function normalizeHeartbeat(value: unknown): number | undefined {
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) return undefined;
+  if (value >= 1e12) return value; // already ms
+  if (value >= 1e9) return value * 1000; // seconds → ms
+  return undefined;
+}
+
+function readLastSeen(data: any): number | undefined {
+  if (!data || typeof data !== "object") return undefined;
+  return normalizeHeartbeat(data.lastSeen ?? data.timestamp ?? data.updatedAt);
+}
 
 function getDeviceStatusFromLastSeen(lastSeen?: number): "online" | "offline" {
   if (!lastSeen) return "offline";
@@ -278,9 +296,14 @@ export default function DeviceControl() {
 
   const [wifiModalOpen, setWifiModalOpen] = useState(false);
   const [loadingId, setLoadingId] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
 
   // ✅ Track offline notifications to avoid spamming the database
   const hasNotifiedOfflineRef = useRef<boolean>(false);
+  // Freshest heartbeat seen from each source. The dedicated status node wins;
+  // live sensor data is the fallback for firmware that never writes it.
+  const statusLastSeenRef = useRef<number | undefined>(undefined);
+  const sensorsUpdatedAtRef = useRef<number | undefined>(undefined);
 
   useEffect(() => {
     const controlRef = ref(db, "deviceControl/sugarMonitor");
@@ -326,6 +349,19 @@ export default function DeviceControl() {
         }
     };
 
+    // Effective heartbeat: dedicated status node first, live sensor data as
+    // fallback. Without the fallback, firmware that streams sensor values but
+    // never writes deviceStatus/... shows permanently "offline" ("No
+    // heartbeat yet") despite fresh readings.
+    const effectiveStatus = () => {
+      const lastSeen = statusLastSeenRef.current ?? sensorsUpdatedAtRef.current;
+      return {
+        lastSeen,
+        status: getDeviceStatusFromLastSeen(lastSeen),
+        lastUpdate: formatLastSeen(lastSeen),
+      };
+    };
+
     const unsubControl = onValue(controlRef, (snapshot) => {
       const data = snapshot.val();
       if (!data) return;
@@ -343,23 +379,16 @@ export default function DeviceControl() {
     });
 
     const unsubStatus = onValue(statusRef, (snapshot) => {
-      const data = snapshot.val();
-      const lastSeen = data?.lastSeen as number | undefined;
-      const computedStatus = getDeviceStatusFromLastSeen(lastSeen);
-      const lastUpdate = formatLastSeen(lastSeen);
-      
+      statusLastSeenRef.current = readLastSeen(snapshot.val());
+      const { lastSeen, status, lastUpdate } = effectiveStatus();
+
       // Check and trigger notification on status change
-      checkAndNotifyOfflineStatus(computedStatus);
+      checkAndNotifyOfflineStatus(status);
 
       setDevices((prev) =>
         prev.map((device) =>
           device.controlKey === "sugarMonitor"
-            ? {
-                ...device,
-                lastSeen,
-                status: computedStatus,
-                lastUpdate,
-              }
+            ? { ...device, lastSeen, status, lastUpdate }
             : device
         )
       );
@@ -369,36 +398,39 @@ export default function DeviceControl() {
       const data = snapshot.val();
       if (!data) return;
 
+      // Fresh sensor values prove the module is alive — feed them into the
+      // heartbeat fallback so status tracks reality.
+      const sensorsFresh = normalizeHeartbeat(data.updatedAt ?? data.time);
+      if (sensorsFresh !== undefined) sensorsUpdatedAtRef.current = sensorsFresh;
+      const eff = effectiveStatus();
+
       setDevices((prev) =>
         prev.map((device) => {
+          let next = device;
+
           if (device.name === "Temperature Sensor") {
-            return {
-              ...device,
-              value:
-                typeof data.temperature === "number"
-                  ? `${data.temperature.toFixed(1)}°C`
-                  : device.value,
-            };
+            next =
+              typeof data.temperature === "number"
+                ? { ...next, value: `${data.temperature.toFixed(1)}°C` }
+                : next;
           }
 
           if (device.name === "Acidity Sensor") {
-            return {
-              ...device,
-              value:
-                typeof data.ph === "number"
-                  ? `${data.ph.toFixed(2)} pH`
-                  : device.value,
-            };
+            next =
+              typeof data.ph === "number"
+                ? { ...next, value: `${data.ph.toFixed(2)} pH` }
+                : next;
           }
 
           if (device.name === "Camera Module") {
-            return {
-              ...device,
-              value: "Monitoring",
-            };
+            next = { ...next, value: "Monitoring" };
           }
 
-          return device;
+          if (device.controlKey === "sugarMonitor") {
+            next = { ...next, lastSeen: eff.lastSeen, status: eff.status, lastUpdate: eff.lastUpdate };
+          }
+
+          return next;
         })
       );
     });
@@ -419,20 +451,15 @@ export default function DeviceControl() {
     });
 
     const interval = setInterval(() => {
+      const eff = effectiveStatus();
+      // Also check periodically in case the database value hasn't changed but the local time has passed the timeout
+      checkAndNotifyOfflineStatus(eff.status);
       setDevices((prev) =>
-        prev.map((device) => {
-          if (device.controlKey === "sugarMonitor") {
-            const computedStatus = getDeviceStatusFromLastSeen(device.lastSeen);
-            // Also check periodically in case the database value hasn't changed but the local time has passed the timeout
-            checkAndNotifyOfflineStatus(computedStatus);
-            return {
-                ...device,
-                status: computedStatus,
-                lastUpdate: formatLastSeen(device.lastSeen),
-              }
-          }
-          return device;
-        })
+        prev.map((device) =>
+          device.controlKey === "sugarMonitor"
+            ? { ...device, lastSeen: eff.lastSeen, status: eff.status, lastUpdate: eff.lastUpdate }
+            : device
+        )
       );
     }, 5000);
 
@@ -488,22 +515,65 @@ export default function DeviceControl() {
     }
   };
 
+  // Refresh previously only recomputed from LOCAL state, so it could never
+  // fix a stale/missed listener update — the button visibly did nothing. It
+  // now re-reads the three source paths from Firebase and applies them.
   const refreshAllDevices = async () => {
-    setDevices((prev) =>
-      prev.map((device) =>
-        device.controlKey === "sugarMonitor"
-          ? {
-              ...device,
-              status: getDeviceStatusFromLastSeen(device.lastSeen),
-              lastUpdate: formatLastSeen(device.lastSeen),
+    if (!db || refreshing) return;
+    setRefreshing(true);
+    try {
+      const [statusSnap, currentSnap, sugarSnap] = await Promise.all([
+        get(ref(db, "deviceStatus/sugarMonitor")),
+        get(ref(db, "sensors/current")),
+        get(ref(db, "sensors/sugar/current")),
+      ]);
+
+      const current = currentSnap.val();
+      const lastSeen =
+        readLastSeen(statusSnap.val()) ??
+        normalizeHeartbeat(current?.updatedAt ?? current?.time);
+      const computedStatus = getDeviceStatusFromLastSeen(lastSeen);
+      const sugarBrix = typeof sugarSnap.val()?.brix === "number" ? sugarSnap.val().brix : null;
+      const sugarTime = typeof sugarSnap.val()?.time === "number" ? sugarSnap.val().time : undefined;
+
+      setDevices((prev) =>
+        prev.map((device) => {
+          if (device.controlKey === "sugarMonitor") {
+            const next = { ...device, lastSeen, status: computedStatus, lastUpdate: formatLastSeen(lastSeen) };
+            if (device.name === "Temperature Sensor" && typeof current?.temperature === "number") {
+              next.value = `${current.temperature.toFixed(1)}°C`;
             }
-          : device
-      )
-    );
+            if (device.name === "Acidity Sensor" && typeof current?.ph === "number") {
+              next.value = `${current.ph.toFixed(2)} pH`;
+            }
+            if (device.name === "Camera Module" && current) {
+              next.value = "Monitoring";
+            }
+            return next;
+          }
+          if (device.name === "Sugar Test (Manual)" && sugarBrix !== null) {
+            return {
+              ...device,
+              value: `${sugarBrix.toFixed(1)} Brix`,
+              lastUpdate: sugarTime ? formatLastSeen(sugarTime) : device.lastUpdate,
+            };
+          }
+          return device;
+        })
+      );
+    } catch (error) {
+      console.error("Failed to refresh devices:", error);
+    } finally {
+      setRefreshing(false);
+    }
   };
 
-  const onlineDevices = devices.filter((d) => d.status === "online").length;
-  const totalDevices = devices.length;
+  // Count only real ESP32 hardware toward online/total — the manual-entry
+  // row and the placeholder backup row can never be "online" and previously
+  // dragged the headline count down permanently.
+  const hardwareDevices = devices.filter((d) => d.controlKey === "sugarMonitor");
+  const onlineDevices = hardwareDevices.filter((d) => d.status === "online").length;
+  const totalDevices = hardwareDevices.length;
   const systemActive = devices.some(
     (d) => d.controlKey === "sugarMonitor" && d.status === "online" && d.enabled
   );
@@ -557,9 +627,9 @@ export default function DeviceControl() {
         </Card>
       </div>
 
-      <Button variant="outline" className="w-full" onClick={refreshAllDevices}>
-        <RefreshCwIcon className="w-4 h-4 mr-2" />
-        Refresh All Devices
+      <Button variant="outline" className="w-full rounded-full" onClick={refreshAllDevices} disabled={refreshing}>
+        <RefreshCwIcon className={`w-4 h-4 mr-2 ${refreshing ? "animate-spin" : ""}`} />
+        {refreshing ? "Refreshing..." : "Refresh All Devices"}
       </Button>
 
       <div>
