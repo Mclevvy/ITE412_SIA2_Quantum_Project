@@ -15,7 +15,8 @@ import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTr
 import { Button } from './ui/button';
 import Logo from './Logo';
 import { useNavigate } from 'react-router-dom';
-import { hasPin } from '../lib/pinLock';
+import { useAuth } from '../lib/auth';
+import { hasPinFor, clearPin, clearTrust } from '../lib/pinLock';
 
 // Import Firebase Authentication functions
 import { signOut } from "firebase/auth";
@@ -29,6 +30,8 @@ interface NavigationProps {
 
 export default function Navigation({ currentScreen, onNavigate, onManagePin }: NavigationProps) {
   const navigate = useNavigate();
+  const { user } = useAuth();
+  const pinOn = hasPinFor(user?.uid);
   const mainNavItems = [
     { id: 'dashboard', icon: HomeIcon, label: 'Home' },
     { id: 'sorting', icon: ScanLineIcon, label: 'Sorting' },
@@ -46,10 +49,12 @@ export default function Navigation({ currentScreen, onNavigate, onManagePin }: N
     { id: 'devices', icon: CpuIcon, label: 'Devices' },
   ];
 
-  // The Ghost Session Killer
+  // The Ghost Session Killer — destroys the trusted-device session too,
+  // so the next launch requires the full email+password sign-in again.
   const handleLogout = () => {
     signOut(auth).then(() => {
-      // Successfully destroyed the Firebase session token
+      clearPin();
+      clearTrust();
       // SPA navigation keeps the app shell alive instead of a full reload.
       navigate("/", { replace: true });
     }).catch((error) => {
@@ -142,8 +147,8 @@ export default function Navigation({ currentScreen, onNavigate, onManagePin }: N
                         <LockIcon className="w-4 h-4" />
                         App PIN
                       </span>
-                      <span className={`text-xs font-semibold ${hasPin() ? 'text-green-700' : 'text-gray-400'}`}>
-                        {hasPin() ? 'On' : 'Off'}
+                      <span className={`text-xs font-semibold ${pinOn ? 'text-green-700' : 'text-gray-400'}`}>
+                        {pinOn ? 'On' : 'Off'}
                       </span>
                     </Button>
                   </SheetClose>

@@ -8,7 +8,8 @@ import { Eye, EyeOff } from "lucide-react";
 import fermaLogo from "../assets/fermalogo.png";
 
 import { signInWithEmailAndPassword, sendPasswordResetEmail } from "firebase/auth";
-import { auth } from "../lib/firebase"; 
+import { auth } from "../lib/firebase";
+import { setTrustedSince } from "../lib/pinLock";
 
 interface LoginPageProps {
   onLogin: () => void;
@@ -32,6 +33,8 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
     setLoading(true);
     try {
       await signInWithEmailAndPassword(auth, email, password);
+      // Password sign-in (re)starts the 60-day trusted-device window.
+      setTrustedSince(Date.now());
       onLogin();
     } catch (error: any) {
       setErr(mapAuthError(error?.code));

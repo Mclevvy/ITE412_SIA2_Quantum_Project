@@ -8,10 +8,11 @@ import Logo from "./Logo";
 import {
   PIN_LENGTH,
   MAX_PIN_ATTEMPTS,
-  hasPin,
-  markPinSkipped,
-  setPin,
-  verifyPin,
+  MAX_SESSION_DAYS,
+  hasPinFor,
+  markPinSkippedFor,
+  setPinFor,
+  verifyPinFor,
   clearPin,
 } from "../lib/pinLock";
 
@@ -57,7 +58,7 @@ function PinEntry({
         onChange={(v) => onChange(v.replace(/\D/g, "").slice(0, PIN_LENGTH))}
       >
         <InputOTPGroup>
-          {[0, 1, 2, 3].map((i) => (
+          {Array.from({ length: PIN_LENGTH }, (_, i) => (
             <InputOTPSlot key={i} index={i} className="bg-white/10 border-white/20 text-white" />
           ))}
         </InputOTPGroup>
@@ -66,8 +67,8 @@ function PinEntry({
   );
 }
 
-/** First-run: create a PIN (or skip). Shown once per device. */
-export function PinSetup({ onDone }: { onDone: (created: boolean) => void }) {
+/** First-run: create a 6-digit PIN (or skip). Shown once per account. */
+export function PinSetup({ uid, onDone }: { uid: string; onDone: (created: boolean) => void }) {
   const [step, setStep] = useState<"create" | "confirm">("create");
   const [pin, setPinValue] = useState("");
   const [confirm, setConfirm] = useState("");
@@ -89,16 +90,16 @@ export function PinSetup({ onDone }: { onDone: (created: boolean) => void }) {
       return;
     }
     setBusy(true);
-    setPin(pin)
+    setPinFor(pin, uid)
       .then(() => onDone(true))
       .catch(() => {
         setErr("Couldn't save the PIN on this device.");
         setBusy(false);
       });
-  }, [confirm, step, pin, busy, onDone]);
+  }, [confirm, step, pin, busy, uid, onDone]);
 
   const handleSkip = () => {
-    markPinSkipped();
+    markPinSkippedFor(uid);
     onDone(false);
   };
 
@@ -107,8 +108,8 @@ export function PinSetup({ onDone }: { onDone: (created: boolean) => void }) {
       title={step === "create" ? "Set an app PIN" : "Confirm your PIN"}
       subtitle={
         step === "create"
-          ? "Unlock quickly next time without typing your password."
-          : "Enter the same 4 digits again."
+          ? `A ${PIN_LENGTH}-digit PIN unlocks this trusted device for up to ${MAX_SESSION_DAYS} days.`
+          : `Enter the same ${PIN_LENGTH} digits again.`
       }
     >
       <PinEntry value={step === "create" ? pin : confirm} onChange={step === "create" ? setPinValue : setConfirm} disabled={busy} />
@@ -138,8 +139,8 @@ export function PinSetup({ onDone }: { onDone: (created: boolean) => void }) {
   );
 }
 
-/** Per-launch gate: correct PIN continues into the app. */
-export function PinUnlock({ onUnlock }: { onUnlock: () => void }) {
+/** Per-launch gate: correct PIN continues into the trusted session. */
+export function PinUnlock({ uid, onUnlock }: { uid: string; onUnlock: () => void }) {
   const navigate = useNavigate();
   const [pin, setPinValue] = useState("");
   const [err, setErr] = useState<string | null>(null);
@@ -150,7 +151,7 @@ export function PinUnlock({ onUnlock }: { onUnlock: () => void }) {
   useEffect(() => {
     if (pin.length !== PIN_LENGTH || busy) return;
     setBusy(true);
-    verifyPin(pin).then((ok) => {
+    verifyPinFor(pin, uid).then((ok) => {
       if (ok) {
         onUnlock();
         return;
@@ -166,14 +167,14 @@ export function PinUnlock({ onUnlock }: { onUnlock: () => void }) {
         setErr(`Wrong PIN. ${MAX_PIN_ATTEMPTS - nextFails} attempt(s) left.`);
       }
     });
-  }, [pin, busy, fails, onUnlock, navigate]);
+  }, [pin, busy, fails, uid, onUnlock, navigate]);
 
   const usePasswordInstead = () => {
     void signOut(auth).finally(() => navigate("/", { replace: true }));
   };
 
   return (
-    <PinShell title="Enter app PIN" subtitle="Unlock Bunius-Sense on this device.">
+    <PinShell title="Enter app PIN" subtitle="Unlock this trusted device.">
       <PinEntry value={pin} onChange={(v) => { setPinValue(v); setErr(null); }} disabled={busy} />
       {err && <p className="text-sm text-red-300 mt-4">{err}</p>}
       {attemptsLeft < MAX_PIN_ATTEMPTS && attemptsLeft > 0 && (
@@ -187,7 +188,7 @@ export function PinUnlock({ onUnlock }: { onUnlock: () => void }) {
 }
 
 /** Change / remove the PIN from inside the app. Falls back to create flow. */
-export function PinManage({ onDone }: { onDone: () => void }) {
+export function PinManage({ uid, onDone }: { uid: string; onDone: () => void }) {
   const [step, setStep] = useState<"verify" | "create" | "confirm">("verify");
   const [oldPin, setOldPin] = useState("");
   const [pin, setPinValue] = useState("");
@@ -196,14 +197,14 @@ export function PinManage({ onDone }: { onDone: () => void }) {
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    // No PIN on record: go straight to create.
-    if (!hasPin()) setStep("create");
-  }, []);
+    // No PIN on record for this account: go straight to create.
+    if (!hasPinFor(uid)) setStep("create");
+  }, [uid]);
 
   useEffect(() => {
     if (step !== "verify" || oldPin.length !== PIN_LENGTH || busy) return;
     setBusy(true);
-    verifyPin(oldPin).then((ok) => {
+    verifyPinFor(oldPin, uid).then((ok) => {
       setBusy(false);
       if (ok) {
         setErr(null);
@@ -213,7 +214,7 @@ export function PinManage({ onDone }: { onDone: () => void }) {
         setOldPin("");
       }
     });
-  }, [oldPin, step, busy]);
+  }, [oldPin, step, busy, uid]);
 
   useEffect(() => {
     if (step === "create" && pin.length === PIN_LENGTH) {
@@ -230,16 +231,17 @@ export function PinManage({ onDone }: { onDone: () => void }) {
       return;
     }
     setBusy(true);
-    setPin(pin)
+    setPinFor(pin, uid)
       .then(() => onDone())
       .catch(() => {
         setErr("Couldn't save the PIN on this device.");
         setBusy(false);
       });
-  }, [confirm, step, pin, busy, onDone]);
+  }, [confirm, step, pin, busy, uid, onDone]);
 
   const handleRemove = () => {
     clearPin();
+    markPinSkippedFor(uid);
     onDone();
   };
 
@@ -250,11 +252,11 @@ export function PinManage({ onDone }: { onDone: () => void }) {
         step === "verify"
           ? "Enter your current PIN first."
           : step === "create"
-            ? "Enter a new 4-digit PIN."
+            ? `Enter a new ${PIN_LENGTH}-digit PIN.`
             : "Confirm the new PIN."
       }
     >
-      {step === "verify" && hasPin() && (
+      {step === "verify" && hasPinFor(uid) && (
         <PinEntry value={oldPin} onChange={(v) => { setOldPin(v); setErr(null); }} disabled={busy} />
       )}
       {step === "create" && (
@@ -265,7 +267,7 @@ export function PinManage({ onDone }: { onDone: () => void }) {
       )}
       {err && <p className="text-sm text-red-300 mt-4">{err}</p>}
       <div className="mt-6 space-y-3">
-        {step !== "verify" && hasPin() && (
+        {step !== "verify" && hasPinFor(uid) && (
           <Button
             type="button"
             variant="outline"
@@ -283,7 +285,7 @@ export function PinManage({ onDone }: { onDone: () => void }) {
           disabled={busy}
           onClick={onDone}
         >
-          {hasPin() ? "Cancel" : "Done"}
+          {hasPinFor(uid) ? "Cancel" : "Done"}
         </Button>
       </div>
     </PinShell>

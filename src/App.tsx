@@ -10,7 +10,17 @@ import { PinSetup, PinUnlock, PinManage } from "./components/PinLock";
 
 import { AuthProvider, useAuth } from "./lib/auth";
 import ProtectedRoute from "./ProtectedRoute";
-import { hasPin, wasPinSkipped } from "./lib/pinLock";
+import { signOut } from "firebase/auth";
+import { auth } from "./lib/firebase";
+import {
+  hasPinFor,
+  wasPinSkippedFor,
+  getTrustedSince,
+  setTrustedSince,
+  clearPin,
+  clearTrust,
+  MAX_SESSION_MS,
+} from "./lib/pinLock";
 import { initializePushNotifications } from "./lib/pushNotifications";
 
 const FruitSorting = lazy(() => import("./components/FruitSorting"));
@@ -39,30 +49,75 @@ function isScreenId(value: string | undefined): value is ScreenId {
 }
 
 /**
- * Device-PIN gate around the authenticated app. First launch after sign-in
- * offers PIN setup (once); every later launch with a live Firebase session
- * asks for the PIN instead of the password. The unlock lives only in memory,
- * so it naturally resets on sign-out or full restart. PIN changes made from
- * the More sheet notify via the "bunius:pin-changed" window event.
+ * Trusted-device gate around the authenticated app.
+ *
+ *   FIRST LOGIN (email+password) → PIN setup offered once per account
+ *     → trusted device created (trust timestamp stored, 60-day max)
+ *   EVERY LAUNCH within the window → PIN unlocks the live session
+ *   LOGOUT or 60-DAY EXPIRY → trust destroyed → email+password again
+ *
+ * The PIN never carries its own lifetime: it only unlocks a trusted
+ * session while device trust is valid. Unlock state lives in memory, so it
+ * resets on sign-out or restart. PIN changes from the More sheet notify via
+ * the "bunius:pin-changed" window event.
  */
 function AuthedGate({ children }: { children: ReactNode }) {
+  const { user } = useAuth();
+  const uid = user?.uid ?? "";
   const [unlocked, setUnlocked] = useState(false);
-  const [pinKnown, setPinKnown] = useState(() => hasPin());
+  const [pinKnown, setPinKnown] = useState(() => hasPinFor(uid));
+  const [trust, setTrust] = useState<"checking" | "ok" | "expired">("checking");
+  // Bump after setup/skip so the gate re-reads storage even when pinKnown
+  // itself didn't change value (React bails out on identical state, which
+  // previously left the setup screen stuck after Skip).
+  const [, setGateTick] = useState(0);
+  const refreshGate = () => {
+    setPinKnown(hasPinFor(uid));
+    setGateTick((t) => t + 1);
+  };
 
   useEffect(() => {
-    const refresh = () => setPinKnown(hasPin());
-    window.addEventListener("bunius:pin-changed", refresh);
-    return () => window.removeEventListener("bunius:pin-changed", refresh);
-  }, []);
+    window.addEventListener("bunius:pin-changed", refreshGate);
+    return () => window.removeEventListener("bunius:pin-changed", refreshGate);
+  }, [uid]);
 
-  if (pinKnown && !unlocked) {
-    return <PinUnlock onUnlock={() => setUnlocked(true)} />;
+  // Trust lifetime: grandfather pre-existing sessions into a fresh 60-day
+  // window once; afterwards an expired trust forces password re-auth.
+  useEffect(() => {
+    if (!uid) return;
+    let since = getTrustedSince();
+    if (since === null) {
+      since = Date.now();
+      setTrustedSince(since);
+    }
+    if (Date.now() - since > MAX_SESSION_MS) {
+      clearPin();
+      clearTrust();
+      setTrust("expired");
+      void signOut(auth).catch(() => undefined);
+    } else {
+      setTrust("ok");
+    }
+  }, [uid]);
+
+  if (trust !== "ok") {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-[#2A0A12]">
+        <div className="animate-pulse text-white/60">
+          {trust === "expired" ? "Session expired — signing out…" : "Checking session…"}
+        </div>
+      </div>
+    );
   }
-  if (!pinKnown && !wasPinSkipped()) {
+  if (pinKnown && !unlocked) {
+    return <PinUnlock uid={uid} onUnlock={() => setUnlocked(true)} />;
+  }
+  if (!pinKnown && !wasPinSkippedFor(uid)) {
     return (
       <PinSetup
+        uid={uid}
         onDone={(created) => {
-          setPinKnown(hasPin());
+          refreshGate();
           if (created) setUnlocked(true);
         }}
       />
@@ -147,7 +202,7 @@ function MainLayout() {
 
         {pinManageOpen && (
           <div className="fixed inset-0 z-[60] overflow-y-auto">
-            <PinManage onDone={closePinManage} />
+            <PinManage uid={user?.uid ?? ""} onDone={closePinManage} />
           </div>
         )}
       </div>

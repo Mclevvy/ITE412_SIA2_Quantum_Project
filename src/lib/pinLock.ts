@@ -1,21 +1,33 @@
 /**
- * Device PIN lock — fast unlock for a shared field phone.
- * ------------------------------------------------------
- * The PIN is a LOCAL convenience lock, not a credential: Firebase Auth still
- * owns the real session, and the PIN gate only appears while that session is
- * alive. If the session expires, the user signs in with email/password again.
+ * Trusted-device session + local PIN unlock.
+ * ------------------------------------------
+ * Architecture (see in-code diagram in AuthedGate):
+ *
+ *   FIRST LOGIN (email+password) → verify → create 6-digit PIN
+ *     → trusted device created (trust timestamp stored)
+ *   EVERY LAUNCH within 60 days → PIN unlocks the live session
+ *   LOGOUT or 60-DAY EXPIRY → trust destroyed → email+password again
+ *
+ * The important distinction: the PIN itself is never "valid for 60 days".
+ * The authenticated device trust is valid for up to 60 days; the PIN merely
+ * unlocks that trusted session on each launch.
  *
  * Storage: localStorage (persists in the Capacitor webview). The PIN itself
- * is NEVER stored — only a salted SHA-256 hash. This is a deterrent for
- * casual access on a shared device, not a vault against forensic extraction.
+ * is NEVER stored — only a salted SHA-256 hash. Everything is scoped per
+ * Firebase uid so a second account on a shared phone gets its own setup
+ * instead of being locked behind someone else's PIN.
  */
 
-export const PIN_LENGTH = 4;
+export const PIN_LENGTH = 6;
 export const MAX_PIN_ATTEMPTS = 5;
+export const MAX_SESSION_DAYS = 60;
+export const MAX_SESSION_MS = MAX_SESSION_DAYS * 24 * 60 * 60 * 1000;
 
 const HASH_KEY = "bunius.pinHash";
 const SALT_KEY = "bunius.pinSalt";
-const SKIPPED_KEY = "bunius.pinSkipped";
+const UID_KEY = "bunius.pinUid";
+const SKIPPED_UID_KEY = "bunius.pinSkippedUid";
+const TRUSTED_SINCE_KEY = "bunius.trustedSince";
 
 function storageGet(key: string): string | null {
   try {
@@ -79,31 +91,71 @@ export function isPinFormatValid(pin: string): boolean {
   return new RegExp(`^\\d{${PIN_LENGTH}}$`).test(pin);
 }
 
+/** PIN exists AND belongs to this account. */
+export function hasPinFor(uid: string | null | undefined): boolean {
+  if (!uid) return false;
+  return storageGet(HASH_KEY) !== null && storageGet(SALT_KEY) !== null && storageGet(UID_KEY) === uid;
+}
+
+/** Legacy alias — prefer hasPinFor(uid). */
 export function hasPin(): boolean {
   return storageGet(HASH_KEY) !== null && storageGet(SALT_KEY) !== null;
 }
 
-export function wasPinSkipped(): boolean {
-  return storageGet(SKIPPED_KEY) === "1";
+export function wasPinSkippedFor(uid: string | null | undefined): boolean {
+  if (!uid) return false;
+  return storageGet(SKIPPED_UID_KEY) === uid;
 }
 
+/** Legacy alias — prefer wasPinSkippedFor(uid). */
+export function wasPinSkipped(): boolean {
+  return storageGet(SKIPPED_UID_KEY) !== null;
+}
+
+export function markPinSkippedFor(uid: string): void {
+  storageSet(SKIPPED_UID_KEY, uid);
+}
+
+/** Legacy alias. */
 export function markPinSkipped(): void {
-  storageSet(SKIPPED_KEY, "1");
+  storageSet(SKIPPED_UID_KEY, "1");
 }
 
 export function clearPinSkipped(): void {
-  storageRemove(SKIPPED_KEY);
+  storageRemove(SKIPPED_UID_KEY);
 }
 
+export async function setPinFor(pin: string, uid: string): Promise<void> {
+  if (!isPinFormatValid(pin)) throw new Error(`PIN must be ${PIN_LENGTH} digits.`);
+  if (!uid) throw new Error("Account id is required to store a PIN.");
+  const salt = randomSaltHex();
+  const hash = await sha256Hex(`${salt}:${uid}:${pin}`);
+  storageSet(SALT_KEY, salt);
+  storageSet(HASH_KEY, hash);
+  storageSet(UID_KEY, uid);
+  storageRemove(SKIPPED_UID_KEY);
+  setTrustedSince(Date.now());
+}
+
+/** Legacy alias — prefer setPinFor(pin, uid). */
 export async function setPin(pin: string): Promise<void> {
   if (!isPinFormatValid(pin)) throw new Error(`PIN must be ${PIN_LENGTH} digits.`);
   const salt = randomSaltHex();
   const hash = await sha256Hex(`${salt}:${pin}`);
   storageSet(SALT_KEY, salt);
   storageSet(HASH_KEY, hash);
-  storageRemove(SKIPPED_KEY);
+  storageRemove(SKIPPED_UID_KEY);
 }
 
+export async function verifyPinFor(pin: string, uid: string): Promise<boolean> {
+  const salt = storageGet(SALT_KEY);
+  const expected = storageGet(HASH_KEY);
+  if (!salt || !expected || storageGet(UID_KEY) !== uid) return false;
+  const actual = await sha256Hex(`${salt}:${uid}:${pin}`);
+  return actual === expected;
+}
+
+/** Legacy alias — prefer verifyPinFor(pin, uid). */
 export async function verifyPin(pin: string): Promise<boolean> {
   const salt = storageGet(SALT_KEY);
   const expected = storageGet(HASH_KEY);
@@ -115,5 +167,28 @@ export async function verifyPin(pin: string): Promise<boolean> {
 export function clearPin(): void {
   storageRemove(HASH_KEY);
   storageRemove(SALT_KEY);
-  storageRemove(SKIPPED_KEY);
+  storageRemove(UID_KEY);
+  storageRemove(SKIPPED_UID_KEY);
+}
+
+/** Start (or renew) the 60-day trusted-device window. Call on password login. */
+export function setTrustedSince(timestamp: number): void {
+  storageSet(TRUSTED_SINCE_KEY, String(timestamp));
+}
+
+export function getTrustedSince(): number | null {
+  const raw = storageGet(TRUSTED_SINCE_KEY);
+  const ts = raw === null ? NaN : Number(raw);
+  return Number.isFinite(ts) && ts > 0 ? ts : null;
+}
+
+/** Destroy device trust (logout / expiry / lockout). */
+export function clearTrust(): void {
+  storageRemove(TRUSTED_SINCE_KEY);
+}
+
+export function isTrustExpired(now: number = Date.now()): boolean {
+  const since = getTrustedSince();
+  if (since === null) return false;
+  return now - since > MAX_SESSION_MS;
 }
