@@ -97,10 +97,17 @@ sample_input = np.array([
 print("Sample predictions:")
 print(model.predict((sample_input - feature_mean) / feature_std, verbose=0).flatten())
 
-output_dir = os.path.join(os.getcwd(), "public", "model_master")
+# Training output goes to public/model_abv/, NOT public/model_master/.
+# public/model_master/ holds the frozen 4-in/3-out artifact the app loads
+# (FermentationTracker + PredictiveInsights read outputs 0..2); this script
+# trains a divergent 4-in/1-out model, so writing it there would brick the
+# AI panel. Retraining does NOT change the app until someone deliberately
+# swaps the artifact into /model_master/.
+output_dir = os.path.join(os.getcwd(), "public", "model_abv")
 os.makedirs(output_dir, exist_ok=True)
 
-# Export as TensorFlow.js model files expected by tf.loadLayersModel('/model_master/model.json').
+# Export as TensorFlow.js model files expected by tf.loadLayersModel('/model_master/model.json')
+# once this scratch model is deliberately promoted to public/model_master/.
 # This needs the tensorflowjs package, which is installed via:
 #   py -3 -m pip install tensorflow tensorflowjs
 try:
@@ -114,3 +121,11 @@ except Exception as exc:  # pragma: no cover
 
 print("Final training loss:", history.history["loss"][-1])
 print("Final validation loss:", history.history["val_loss"][-1])
+
+print(
+    "\nNOTE: the app loads the frozen artifact from /model_master/ (4 inputs / 3 outputs:\n"
+    "days remaining, quality %, risk %). This run produced a 4-in/1-out model in\n"
+    "public/model_abv/, which nothing in the app reads. Retraining does NOT change\n"
+    "the app — someone must deliberately swap the artifact into public/model_master/\n"
+    "and align the output contract before the new model is usable."
+)

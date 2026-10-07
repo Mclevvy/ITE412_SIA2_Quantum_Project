@@ -2,7 +2,13 @@ import fs from 'node:fs';
 import path from 'node:path';
 import * as tf from '@tensorflow/tfjs-node';
 
-const outDir = path.resolve('public/model_master');
+// Training output goes to public/model_abv/, NOT public/model_master/.
+// public/model_master/ holds the frozen 4-in/3-out artifact the app loads
+// (FermentationTracker + PredictiveInsights read outputs 0..2); this script
+// trains a divergent 4-in/1-out model, so writing it there would brick the
+// AI panel. Retraining does NOT change the app until someone deliberately
+// swaps the artifact into /model_master/.
+const outDir = path.resolve('public/model_abv');
 fs.mkdirSync(outDir, { recursive: true });
 
 function generateSyntheticData(samples = 2400) {
@@ -87,9 +93,17 @@ async function main() {
     calibration_reference: [7.0, 24.0, 3.5, 6.0],
   };
 
+  // Scratch artifact only — consumers load /model_master/ (frozen artifact).
   fs.writeFileSync(path.join(outDir, 'abvModelParams.json'), JSON.stringify(params, null, 2));
   console.log(`Model and params saved to ${outDir}`);
   console.log('Model JSON location:', modelJson);
+  console.log(
+    '\nNOTE: the app loads the frozen artifact from /model_master/ (4 inputs / 3 outputs:\n' +
+      'days remaining, quality %, risk %). This run produced a 4-in/1-out model in\n' +
+      'public/model_abv/, which nothing in the app reads. Retraining does NOT change\n' +
+      'the app — someone must deliberately swap the artifact into public/model_master/\n' +
+      'and align the output contract before the new model is usable.',
+  );
 
   xs.dispose();
   ys.dispose();

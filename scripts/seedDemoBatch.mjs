@@ -34,16 +34,33 @@ import { initializeApp } from "firebase/app";
 import { getAuth, signInWithEmailAndPassword } from "firebase/auth";
 import { getDatabase, ref, push, set, get, remove } from "firebase/database";
 
+// Config comes only from env (loaded via `node --env-file-if-exists=.env`),
+// so a missing/incorrect .env fails loudly instead of hitting production.
+const REQUIRED_ENV = [
+  "VITE_FIREBASE_API_KEY",
+  "VITE_FIREBASE_AUTH_DOMAIN",
+  "VITE_FIREBASE_DATABASE_URL",
+  "VITE_FIREBASE_PROJECT_ID",
+  "VITE_FIREBASE_STORAGE_BUCKET",
+  "VITE_FIREBASE_MESSAGING_SENDER_ID",
+  "VITE_FIREBASE_APP_ID",
+];
+const missingEnv = REQUIRED_ENV.filter((key) => !process.env[key]);
+if (missingEnv.length) {
+  console.error(
+    `Missing Firebase configuration: ${missingEnv.join(", ")}. ` +
+      "Copy .env.example to .env and fill in your Firebase web config."
+  );
+  process.exit(1);
+}
 const firebaseConfig = {
-  apiKey: process.env.VITE_FIREBASE_API_KEY ?? "AIzaSyB39fVBk55r5eo8WHvyjaQlhITH_wU7sGg",
-  authDomain: process.env.VITE_FIREBASE_AUTH_DOMAIN ?? "ferma-9eb60.firebaseapp.com",
-  databaseURL:
-    process.env.VITE_FIREBASE_DATABASE_URL ??
-    "https://ferma-9eb60-default-rtdb.asia-southeast1.firebasedatabase.app",
-  projectId: process.env.VITE_FIREBASE_PROJECT_ID ?? "ferma-9eb60",
-  storageBucket: process.env.VITE_FIREBASE_STORAGE_BUCKET ?? "ferma-9eb60.firebasestorage.app",
-  messagingSenderId: process.env.VITE_FIREBASE_MESSAGING_SENDER_ID ?? "696158561611",
-  appId: process.env.VITE_FIREBASE_APP_ID ?? "1:696158561611:web:dc6506661c296e8214b4ce",
+  apiKey: process.env.VITE_FIREBASE_API_KEY,
+  authDomain: process.env.VITE_FIREBASE_AUTH_DOMAIN,
+  databaseURL: process.env.VITE_FIREBASE_DATABASE_URL,
+  projectId: process.env.VITE_FIREBASE_PROJECT_ID,
+  storageBucket: process.env.VITE_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: process.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+  appId: process.env.VITE_FIREBASE_APP_ID,
 };
 
 const BRIX_TO_ABV = 0.59;
