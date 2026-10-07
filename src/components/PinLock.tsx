@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { signOut } from "firebase/auth";
 import { auth } from "../lib/firebase";
+import { clearDeviceTokens } from "../lib/pushNotifications";
 import { Button } from "./ui/button";
 import { InputOTP, InputOTPGroup, InputOTPSlot } from "./ui/input-otp";
 import Logo from "./Logo";
@@ -32,7 +33,7 @@ function PinShell({
         <div className="w-full max-w-xs text-center">
           <Logo size="xl" className="mx-auto mb-4" />
           <h1 className="text-white text-xl font-bold">{title}</h1>
-          <p className="text-white/60 text-sm mt-1 mb-6">{subtitle}</p>
+          <p className="text-white/80 text-sm mt-1 mb-6">{subtitle}</p>
           {children}
         </div>
       </div>
@@ -113,7 +114,7 @@ export function PinSetup({ uid, onDone }: { uid: string; onDone: (created: boole
       }
     >
       <PinEntry value={step === "create" ? pin : confirm} onChange={step === "create" ? setPinValue : setConfirm} disabled={busy} />
-      {err && <p className="text-sm text-red-300 mt-4">{err}</p>}
+      {err && <p role="alert" className="text-sm text-red-300 mt-4">{err}</p>}
       <div className="mt-6 space-y-3">
         {step === "confirm" && (
           <Button
@@ -131,7 +132,7 @@ export function PinSetup({ uid, onDone }: { uid: string; onDone: (created: boole
             Start over
           </Button>
         )}
-        <button type="button" onClick={handleSkip} disabled={busy} className="text-sm text-white/60 hover:text-white hover:underline disabled:opacity-50">
+        <button type="button" onClick={handleSkip} disabled={busy} className="inline-flex items-center justify-center min-h-[44px] min-w-[44px] px-2 text-sm text-white/80 hover:text-white hover:underline disabled:opacity-50">
           Skip for now
         </button>
       </div>
@@ -162,7 +163,11 @@ export function PinUnlock({ uid, onUnlock }: { uid: string; onUnlock: () => void
       setBusy(false);
       if (nextFails >= MAX_PIN_ATTEMPTS) {
         // Too many guesses: drop the session and require the real password.
-        void signOut(auth).finally(() => navigate("/", { replace: true }));
+        // Awaiting the token clear first — it needs the live session (rules
+        // require auth.uid === $uid) and would lose the race against signOut.
+        clearDeviceTokens(uid).then(() => {
+          void signOut(auth).finally(() => navigate("/", { replace: true }));
+        });
       } else {
         setErr(`Wrong PIN. ${MAX_PIN_ATTEMPTS - nextFails} attempt(s) left.`);
       }
@@ -170,17 +175,22 @@ export function PinUnlock({ uid, onUnlock }: { uid: string; onUnlock: () => void
   }, [pin, busy, fails, uid, onUnlock, navigate]);
 
   const usePasswordInstead = () => {
-    void signOut(auth).finally(() => navigate("/", { replace: true }));
+    // Rules require auth.uid === $uid on deviceTokens, so this must be written
+    // while the session is still alive — awaited so the delete can't lose the
+    // race against signOut.
+    clearDeviceTokens(uid).then(() => {
+      void signOut(auth).finally(() => navigate("/", { replace: true }));
+    });
   };
 
   return (
     <PinShell title="Enter app PIN" subtitle="Unlock this trusted device.">
       <PinEntry value={pin} onChange={(v) => { setPinValue(v); setErr(null); }} disabled={busy} />
-      {err && <p className="text-sm text-red-300 mt-4">{err}</p>}
+      {err && <p role="alert" className="text-sm text-red-300 mt-4">{err}</p>}
       {attemptsLeft < MAX_PIN_ATTEMPTS && attemptsLeft > 0 && (
-        <p className="text-xs text-white/50 mt-2">{attemptsLeft} attempt(s) left before sign-out.</p>
+        <p aria-live="polite" className="text-xs text-white/80 mt-2">{attemptsLeft} attempt(s) left before sign-out.</p>
       )}
-      <button type="button" onClick={usePasswordInstead} className="text-sm text-white/60 hover:text-white hover:underline mt-6">
+      <button type="button" onClick={usePasswordInstead} className="inline-flex items-center justify-center min-h-[44px] min-w-[44px] px-2 text-sm text-white/80 hover:text-white hover:underline mt-6">
         Use password instead
       </button>
     </PinShell>
@@ -265,7 +275,7 @@ export function PinManage({ uid, onDone }: { uid: string; onDone: () => void }) 
       {step === "confirm" && (
         <PinEntry value={confirm} onChange={setConfirm} disabled={busy} />
       )}
-      {err && <p className="text-sm text-red-300 mt-4">{err}</p>}
+      {err && <p role="alert" className="text-sm text-red-300 mt-4">{err}</p>}
       <div className="mt-6 space-y-3">
         {step !== "verify" && hasPinFor(uid) && (
           <Button

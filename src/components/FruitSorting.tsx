@@ -93,6 +93,13 @@ export default function FruitSorting() {
         <PaletteIcon className="w-6 h-6 text-[#8B1538]" />
       </div>
 
+      {/* Sample-data notice: these rows are placeholders, not live classifier output */}
+      <Card className="bg-amber-50 border-amber-200">
+        <CardContent className="p-3">
+          <p className="text-xs text-amber-800 font-medium">Sample data — no live classifier connected</p>
+        </CardContent>
+      </Card>
+
       {/* Mode Toggle */}
       <Card className="bg-gradient-to-r from-purple-50 to-pink-50 border-purple-200">
         <CardContent className="p-4">
@@ -156,8 +163,8 @@ export default function FruitSorting() {
 
         <CardContent className="space-y-2">
           <div className="flex items-center justify-between text-sm">
-            <span className="text-gray-600">Average Confidence</span>
-            <span className="text-gray-900">{report.avgConfidence}%</span>
+            <span className="text-gray-600">Average sample score</span>
+            <span className="text-gray-900">{report.avgConfidence}</span>
           </div>
 
           <div className="space-y-2">
@@ -167,7 +174,7 @@ export default function FruitSorting() {
                   <div className="flex items-center gap-2">
                     <Badge className="bg-gray-900 text-xs">{row.color}</Badge>
                     <span className="text-xs text-gray-500">
-                      Pass rate: {row.passRate}% • Avg conf: {row.avgConfidence}%
+                      Pass rate: {row.passRate}% • Avg score: {row.avgConfidence}
                     </span>
                   </div>
                   <span className="text-xs text-gray-500">Total: {row.total}</span>
@@ -226,7 +233,6 @@ export default function FruitSorting() {
                         >
                           {fruit.status === "qualified" ? "Qualified" : "Rejected"}
                         </Badge>
-                        <p className="text-xs text-gray-600 mt-1">{fruit.confidence}%</p>
                       </div>
                     </div>
                   </CardContent>

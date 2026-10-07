@@ -15,7 +15,12 @@ import {
 import { motion, AnimatePresence } from 'motion/react'; // ✅ Imported Framer Motion
 
 import { db } from '../lib/firebase';
-import { ref, onValue, set, remove } from 'firebase/database'; // ✅ Added 'remove'
+import { get, limitToLast, onValue, query, ref, set, remove } from 'firebase/database';
+
+const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+// The node is never pruned by the writers, so cap every read: without this the
+// app downloads an ever-growing list on every open.
+const NOTIFICATION_READ_LIMIT = 50;
 
 const iconMap: Record<string, any> = {
   ThermometerIcon,
@@ -48,18 +53,31 @@ export default function NotificationCenter() {
     }
     setDbReady(true);
 
-    const notificationsRef = ref(db, 'notifications');
-    const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+    // Default key order (push IDs are chronologically monotonic), NOT
+    // orderByChild('timestamp'): a locally written serverTimestamp() entry is
+    // still pending, so it has no index value and sorted first — bypassing the
+    // 24h filter below. The numeric-timestamp fallback in the mapper handles
+    // the comparison instead.
+    const notificationsQuery = query(
+      ref(db, 'notifications'),
+      limitToLast(NOTIFICATION_READ_LIMIT),
+    );
     const cutoffTimestamp = Date.now() - ONE_DAY_MS;
 
-    const unsubscribe = onValue(notificationsRef, (snapshot) => {
+    const unsubscribe = onValue(notificationsQuery, (snapshot) => {
       const data = snapshot.val();
       if (data) {
         const formattedData: AppNotification[] = Object.keys(data)
-          .map(key => ({ id: key, ...data[key] }))
+          .map(key => {
+            const entry = data[key];
+            // A locally written serverTimestamp() can still be pending, so
+            // fall back to "now" instead of dropping the newest notification.
+            const timestamp = typeof entry.timestamp === 'number' ? entry.timestamp : Date.now();
+            return { id: key, ...entry, timestamp };
+          })
           .filter(notif => notif.timestamp > cutoffTimestamp)
           .sort((a, b) => b.timestamp - a.timestamp);
-        
+
         setNotifications(formattedData);
       } else {
         setNotifications([]);
@@ -90,17 +108,28 @@ export default function NotificationCenter() {
   };
 
   // ✅ ACTION: Clear ALL Notifications
+  // Also prunes entries older than 24h: they are already hidden by the list
+  // filter above, so without this the node would only ever grow.
   const handleClearAll = async () => {
     if (!db) return;
-    
-    // Only delete the notifications currently visible in the filter
+
     const idsToDelete = filteredNotifications.map(n => n.id);
-    
+    const cutoff = Date.now() - ONE_DAY_MS;
+
+    const snap = await get(ref(db, 'notifications'));
+    const stored = snap.exists() ? (snap.val() as Record<string, { timestamp?: number }>) : {};
+    const staleIds = Object.keys(stored).filter(id => {
+      const ts = stored[id]?.timestamp;
+      return typeof ts !== 'number' || ts <= cutoff;
+    });
+
+    const allIds = Array.from(new Set([...idsToDelete, ...staleIds]));
+
     // Optimistic UI Update
-    setNotifications(prev => prev.filter(n => !idsToDelete.includes(n.id)));
+    setNotifications(prev => prev.filter(n => !allIds.includes(n.id)));
 
     // Background Firebase Delete
-    idsToDelete.forEach(async (id) => {
+    allIds.forEach(async (id) => {
        await remove(ref(db, `notifications/${id}`));
     });
   };
@@ -137,9 +166,9 @@ export default function NotificationCenter() {
         </div>
         <div className="flex flex-col items-end gap-2">
           <div className="relative mt-1">
-            <BellIcon className="w-6 h-6 text-[#8B1538]" />
+            <BellIcon aria-hidden="true" className="w-6 h-6 text-[#8B1538]" />
             {unreadCount > 0 && (
-              <div className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 rounded-full flex items-center justify-center shadow-sm">
+              <div className="absolute -top-1 -right-1 w-5 h-5 bg-red-600 rounded-full flex items-center justify-center shadow-sm">
                 <span className="text-xs text-white font-medium">{unreadCount}</span>
               </div>
             )}
@@ -148,36 +177,42 @@ export default function NotificationCenter() {
           {filteredNotifications.length > 0 && (
             <button 
               onClick={handleClearAll}
-              className="text-xs font-medium text-red-600 bg-red-50 hover:bg-red-100 px-2 py-1 rounded transition-colors flex items-center gap-1"
+              className="min-h-[44px] min-w-[44px] px-2 py-1 text-xs font-medium text-red-600 bg-red-50 hover:bg-red-100 rounded transition-colors flex items-center gap-1"
             >
-              <Trash2Icon className="w-3 h-3" /> Clear All
+              <Trash2Icon aria-hidden="true" className="w-3 h-3" /> Clear All
             </button>
           )}
         </div>
       </div>
 
       {/* Filter Badges */}
-      <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
-        <Badge 
-          variant={activeFilter === 'all' ? 'default' : 'outline'} 
+      <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide" role="group" aria-label="Filter notifications">
+        <Badge
+          asChild
+          variant={activeFilter === 'all' ? 'default' : 'outline'}
           className={`whitespace-nowrap cursor-pointer transition-colors ${activeFilter === 'all' ? 'bg-[#8B1538] hover:bg-[#6b102b]' : 'hover:bg-gray-100'}`}
-          onClick={() => setActiveFilter('all')}
         >
-          All ({notifications.length})
+          <button type="button" aria-pressed={activeFilter === 'all'} onClick={() => setActiveFilter('all')}>
+            All ({notifications.length})
+          </button>
         </Badge>
-        <Badge 
-          variant={activeFilter === 'warning' ? 'default' : 'outline'} 
+        <Badge
+          asChild
+          variant={activeFilter === 'warning' ? 'default' : 'outline'}
           className={`whitespace-nowrap cursor-pointer transition-colors ${activeFilter === 'warning' ? 'bg-[#8B1538] hover:bg-[#6b102b]' : 'hover:bg-gray-100'}`}
-          onClick={() => setActiveFilter('warning')}
         >
-          Warnings ({notifications.filter(n => n.type === 'warning').length})
+          <button type="button" aria-pressed={activeFilter === 'warning'} onClick={() => setActiveFilter('warning')}>
+            Warnings ({notifications.filter(n => n.type === 'warning').length})
+          </button>
         </Badge>
-        <Badge 
-          variant={activeFilter === 'success' ? 'default' : 'outline'} 
+        <Badge
+          asChild
+          variant={activeFilter === 'success' ? 'default' : 'outline'}
           className={`whitespace-nowrap cursor-pointer transition-colors ${activeFilter === 'success' ? 'bg-[#8B1538] hover:bg-[#6b102b]' : 'hover:bg-gray-100'}`}
-          onClick={() => setActiveFilter('success')}
         >
-          Success ({notifications.filter(n => n.type === 'success').length})
+          <button type="button" aria-pressed={activeFilter === 'success'} onClick={() => setActiveFilter('success')}>
+            Success ({notifications.filter(n => n.type === 'success').length})
+          </button>
         </Badge>
       </div>
 
@@ -213,7 +248,7 @@ export default function NotificationCenter() {
                   >
                     {/* The Red Background that shows when swiping */}
                     <div className="absolute inset-0 bg-red-500 flex items-center justify-end px-6 rounded-xl">
-                      <Trash2Icon className="text-white w-6 h-6" />
+                      <Trash2Icon aria-hidden="true" className="text-white w-6 h-6" />
                     </div>
 
                     {/* The Draggable Notification Card */}
@@ -254,7 +289,21 @@ export default function NotificationCenter() {
                                 )}
                               </div>
                               <p className="text-sm text-gray-600 mt-1">{notification.message}</p>
-                              <p className="text-xs text-gray-400 mt-2">{formatTimeAgo(notification.timestamp)}</p>
+                              <div className="flex items-center justify-between gap-2 mt-2">
+                                <p className="text-xs text-gray-400">{formatTimeAgo(notification.timestamp)}</p>
+                                {/* Visible delete: swipe is an enhancement, keyboard/SR users need a real control. */}
+                                <button
+                                  type="button"
+                                  aria-label="Delete notification"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleDelete(notification.id);
+                                  }}
+                                  className="inline-flex items-center justify-center min-h-[44px] min-w-[44px] rounded-full text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors"
+                                >
+                                  <Trash2Icon aria-hidden="true" className="w-4 h-4" />
+                                </button>
+                              </div>
                             </div>
                           </div>
                         </CardContent>

@@ -21,7 +21,7 @@ import {
   clearTrust,
   MAX_SESSION_MS,
 } from "./lib/pinLock";
-import { initializePushNotifications } from "./lib/pushNotifications";
+import { clearDeviceTokens, initializePushNotifications } from "./lib/pushNotifications";
 
 const FruitSorting = lazy(() => import("./components/FruitSorting"));
 const FermentationTracker = lazy(() => import("./components/FermentationTracker"));
@@ -94,7 +94,12 @@ function AuthedGate({ children }: { children: ReactNode }) {
       clearPin();
       clearTrust();
       setTrust("expired");
-      void signOut(auth).catch(() => undefined);
+      // Rules require auth.uid === $uid on deviceTokens, so this must be written
+      // while the session is still alive — and awaited, or the delete can lose
+      // the race against the token revocation below.
+      clearDeviceTokens(uid).then(() => {
+        void signOut(auth).catch(() => undefined);
+      });
     } else {
       setTrust("ok");
     }

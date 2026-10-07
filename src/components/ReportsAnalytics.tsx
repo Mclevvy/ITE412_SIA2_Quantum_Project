@@ -1,4 +1,4 @@
-import { useMemo, useState, useEffect } from "react";
+import { useMemo, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 import { Button } from "./ui/button";
@@ -39,7 +39,8 @@ import autoTable from "jspdf-autotable";
 import * as XLSX from "xlsx";
 
 import { db } from "../lib/firebase";
-import { ref, onValue, set } from "firebase/database";
+import { ref, set } from "firebase/database";
+import { useHistoryList } from "../hooks/useHistoryList";
 
 type TabType = "weekly" | "monthly" | "seasonal";
 type ExportType = "pdf" | "excel" | "print";
@@ -47,43 +48,20 @@ type ExportType = "pdf" | "excel" | "print";
 export default function ReportsAnalytics() {
   const [activeTab, setActiveTab] = useState<TabType>("weekly");
   const [showExportMenu, setShowExportMenu] = useState(false);
-  const [historicalData, setHistoricalData] = useState<any[]>([]);
-  const [hiddenInvalidCount, setHiddenInvalidCount] = useState(0);
-  const [isLoading, setIsLoading] = useState(true);
-
-  // 1. FETCH ACTUAL FIREBASE HISTORY
-  useEffect(() => {
-    if (!db) {
-      setIsLoading(false);
-      return;
-    }
-
-    const historyRef = ref(db, 'fermentation/history');
-    const unsubscribe = onValue(historyRef, (snapshot) => {
-      if (snapshot.exists()) {
-        const data = snapshot.val();
-        const formattedHistory = Object.keys(data).map(key => ({
-          id: key,
-          ...data[key]
-        })).sort((a, b) => (a.completedAt || 0) - (b.completedAt || 0));
-
-        // Drop malformed records (legacy/test/partial writes with no batchId)
-        // instead of rendering blank "Unknown" cards. The count is shown, and
-        // scripts/seedDemoBatch.mjs --clean-junk purges them for real.
-        const valid = formattedHistory.filter(
-          (b) => typeof b.batchId === "string" && b.batchId.trim() !== ""
-        );
-        setHiddenInvalidCount(formattedHistory.length - valid.length);
-        setHistoricalData(valid);
-      } else {
-        setHistoricalData([]);
-        setHiddenInvalidCount(0);
-      }
-      setIsLoading(false);
-    });
-
-    return () => unsubscribe();
-  }, []);
+  // 1. FETCH ACTUAL FIREBASE HISTORY (shared hook: same path, mapping,
+  // oldest-first sort, loading + clear-on-delete semantics preserved).
+  // Malformed records (legacy/test/partial writes with no batchId) are
+  // dropped instead of rendering blank "Unknown" cards. The count is shown,
+  // and scripts/seedDemoBatch.mjs --clean-junk purges them for real.
+  const {
+    items: historicalData,
+    isLoading,
+    hiddenInvalidCount,
+  } = useHistoryList("fermentation/history", {
+    sort: (a, b) => (a.completedAt || 0) - (b.completedAt || 0),
+    filter: (b) => typeof b.batchId === "string" && b.batchId.trim() !== "",
+    clearOnEmpty: true,
+  });
 
   // ✅ ACTION: Clear all old test data
   const handleWipeHistory = async () => {
@@ -276,7 +254,11 @@ export default function ReportsAnalytics() {
     const report = getReportData();
     const workbook = XLSX.utils.book_new();
 
-    const mainSheetData = [report.headers, ...report.rows];
+    // Neutralize spreadsheet formula injection: batchId and other DB-sourced
+    // strings starting with = + - @ would execute as formulas in Excel.
+    const guard = (cell: unknown) =>
+      typeof cell === "string" && /^[=+\-@]/.test(cell) ? `'${cell}` : cell;
+    const mainSheetData = [report.headers, ...report.rows.map((row) => row.map(guard))];
     const worksheet = XLSX.utils.aoa_to_sheet(mainSheetData);
 
     XLSX.utils.book_append_sheet(workbook, worksheet, report.sheetName);
@@ -286,10 +268,17 @@ export default function ReportsAnalytics() {
   const printReport = () => {
     const report = getReportData();
 
+    // Escape every interpolated value: batch fields come from the database
+    // and would otherwise execute as HTML in the print window (XSS).
+    const esc = (value: unknown) =>
+      String(value ?? "").replace(/[&<>"']/g, (c) =>
+        ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c] ?? c
+      );
+
     let html = `
       <html>
         <head>
-          <title>Bunius-Sense ${report.title}</title>
+          <title>Bunius-Sense ${esc(report.title)}</title>
           <style>
             body { font-family: Arial, sans-serif; padding: 24px; color: #222; }
             h1, h2 { margin-bottom: 8px; }
@@ -301,14 +290,14 @@ export default function ReportsAnalytics() {
         </head>
         <body>
           <h1>Bunius-Sense Production Report</h1>
-          <h2>${report.title}</h2>
-          <p>Generated: ${new Date().toLocaleString()}</p>
+          <h2>${esc(report.title)}</h2>
+          <p>Generated: ${esc(new Date().toLocaleString())}</p>
           <table>
             <thead>
-              <tr>${report.headers.map((header) => `<th>${header}</th>`).join("")}</tr>
+              <tr>${report.headers.map((header) => `<th>${esc(header)}</th>`).join("")}</tr>
             </thead>
             <tbody>
-              ${report.rows.map((row) => `<tr>${row.map((cell) => `<td>${cell}</td>`).join("")}</tr>`).join("")}
+              ${report.rows.map((row) => `<tr>${row.map((cell) => `<td>${esc(cell)}</td>`).join("")}</tr>`).join("")}
             </tbody>
           </table>
         </body>
@@ -651,11 +640,32 @@ export default function ReportsAnalytics() {
                          <p className="text-[10px] text-gray-500 uppercase font-bold tracking-wider">Avg Acidity</p>
                          <p className="text-sm font-medium">{report.averagePh} pH</p>
                        </div>
-                       <div>
-                         <p className="text-[10px] text-gray-500 uppercase font-bold tracking-wider">Final Brix</p>
-                         <p className="text-sm font-medium text-[#8B1538]">{report.targetBrixAchieved}</p>
-                       </div>
-                     </div>
+<div>
+                          <p className="text-[10px] text-gray-500 uppercase font-bold tracking-wider">Final Brix</p>
+                          <p className="text-sm font-medium text-[#8B1538]">{report.targetBrixAchieved}</p>
+                        </div>
+                      </div>
+
+                      {/* AI ACCURACY — only for batches that captured a live
+                          prediction to score (written by batchWrites.ts). */}
+                      {report.aiAccuracy && (
+                        <div className="mt-3 pt-3 border-t border-gray-100">
+                          <p className="text-[10px] text-gray-500 uppercase font-bold tracking-wider mb-1">
+                            AI Prediction Accuracy
+                          </p>
+                          <div className="flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-gray-600">
+                            {typeof report.aiAccuracy.daysError === "number" && (
+                              <span>Predicted {Math.abs(report.aiAccuracy.daysError)} days off</span>
+                            )}
+                            {typeof report.aiAccuracy.abvError === "number" && (
+                              <span>ABV off by {Math.abs(report.aiAccuracy.abvError).toFixed(1)} pts</span>
+                            )}
+                            <span className={report.aiAccuracy.qualityMatch ? "text-green-700" : "text-amber-700"}>
+                              {report.aiAccuracy.qualityMatch ? "✓" : "✗"} Quality grade matched
+                            </span>
+                          </div>
+                        </div>
+                      )}
                    </CardContent>
                  </Card>
                ))

@@ -7,6 +7,7 @@ import { Badge } from "./ui/badge";
 import { Switch } from "./ui/switch";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
+import { Label } from "./ui/label";
 import {
   WifiIcon,
   WifiOffIcon,
@@ -125,7 +126,7 @@ function WifiSetupModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center">
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center pb-safe">
       <div className="absolute inset-0 bg-black/40" onClick={onClose} />
 
       <motion.div
@@ -189,17 +190,29 @@ function WifiSetupModal({
               <CardTitle className="text-sm">Set Wi-Fi from the app</CardTitle>
             </CardHeader>
             <CardContent className="space-y-2">
-              <Input
-                value={ssid}
-                onChange={(e) => setSsid(e.target.value)}
-                placeholder="SSID (Wi-Fi name)"
-              />
-              <Input
-                value={pass}
-                onChange={(e) => setPass(e.target.value)}
-                placeholder="Password"
-                type="password"
-              />
+              <div>
+                <Label htmlFor="wifi-ssid">Wi-Fi name (SSID)</Label>
+                <Input
+                  id="wifi-ssid"
+                  value={ssid}
+                  onChange={(e) => setSsid(e.target.value)}
+                  placeholder="SSID (Wi-Fi name)"
+                  autoComplete="off"
+                  className="mt-1"
+                />
+              </div>
+              <div>
+                <Label htmlFor="wifi-password">Wi-Fi password</Label>
+                <Input
+                  id="wifi-password"
+                  value={pass}
+                  onChange={(e) => setPass(e.target.value)}
+                  placeholder="Password"
+                  type="password"
+                  autoComplete="new-password"
+                  className="mt-1"
+                />
+              </div>
 
               <Button
                 className="w-full bg-[#8B1538] hover:bg-[#6B1028]"
@@ -579,7 +592,7 @@ export default function DeviceControl() {
   );
 
   return (
-    <div className="p-4 space-y-4">
+    <div className="p-4 space-y-4 pb-28">
       <WifiSetupModal
         open={wifiModalOpen}
         onClose={() => setWifiModalOpen(false)}

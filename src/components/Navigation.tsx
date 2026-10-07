@@ -21,6 +21,7 @@ import { hasPinFor, clearPin, clearTrust } from '../lib/pinLock';
 // Import Firebase Authentication functions
 import { signOut } from "firebase/auth";
 import { auth } from "../lib/firebase"; // Adjust path to your firebase config if needed
+import { clearDeviceTokens } from "../lib/pushNotifications";
 
 interface NavigationProps {
   currentScreen: string;
@@ -52,20 +53,26 @@ export default function Navigation({ currentScreen, onNavigate, onManagePin }: N
   // The Ghost Session Killer — destroys the trusted-device session too,
   // so the next launch requires the full email+password sign-in again.
   const handleLogout = () => {
-    signOut(auth).then(() => {
-      clearPin();
-      clearTrust();
-      // SPA navigation keeps the app shell alive instead of a full reload.
-      navigate("/", { replace: true });
-    }).catch((error) => {
-      console.error("Error logging out:", error);
+    // Must run while still authenticated: the rules for deviceTokens require
+    // auth.uid === $uid, so this write is denied after signOut completes.
+    // Awaited first — otherwise the delete can lose the race against signOut.
+    const uid = user?.uid;
+    (uid ? clearDeviceTokens(uid) : Promise.resolve()).then(() => {
+      signOut(auth).then(() => {
+        clearPin();
+        clearTrust();
+        // SPA navigation keeps the app shell alive instead of a full reload.
+        navigate("/", { replace: true });
+      }).catch((error) => {
+        console.error("Error logging out:", error);
+      });
     });
   };
 
   return (
     <>
       {/* Bottom Navigation */}
-      <div className="fixed bottom-0 left-0 right-0 bg-[#FAF6F1]/90 backdrop-blur-md border-t border-[#8B1538]/10 z-50">
+      <div className="fixed bottom-0 left-0 right-0 bg-[#FAF6F1]/90 backdrop-blur-md border-t border-[#8B1538]/10 z-50 pb-safe">
         <div className="w-full max-w-xl mx-auto">
           <div className="flex items-center justify-around p-2">
             {mainNavItems.map((item) => {
@@ -76,11 +83,13 @@ export default function Navigation({ currentScreen, onNavigate, onManagePin }: N
                 <button
                   key={item.id}
                   onClick={() => onNavigate(item.id)}
+                  aria-current={isActive ? "page" : undefined}
+                  aria-label={item.label}
                   className={`flex flex-col items-center justify-center px-3 py-2 rounded-2xl min-w-[70px] transition-all ${
                     isActive ? 'text-[#8B1538] bg-[#8B1538]/10' : 'text-gray-500 hover:text-gray-700'
                   }`}
                 >
-                  <Icon className={`w-6 h-6 mb-1 ${isActive ? 'fill-[#8B1538]' : ''}`} />
+                  <Icon aria-hidden="true" className={`w-6 h-6 mb-1 ${isActive ? 'fill-[#8B1538]' : ''}`} />
                   <span className="text-xs">{item.label}</span>
                 </button>
               );
@@ -89,8 +98,8 @@ export default function Navigation({ currentScreen, onNavigate, onManagePin }: N
             {/* Menu Sheet Trigger */}
             <Sheet>
               <SheetTrigger asChild>
-                <button className="flex flex-col items-center justify-center px-3 py-2 rounded-2xl min-w-[70px] text-gray-500 hover:text-[#8B1538] transition-colors">
-                  <MenuIcon className="w-6 h-6 mb-1" />
+                <button className="flex flex-col items-center justify-center px-3 py-2 rounded-2xl min-w-[70px] text-gray-500 hover:text-[#8B1538] transition-colors" aria-label="More options">
+                  <MenuIcon aria-hidden="true" className="w-6 h-6 mb-1" />
                   <span className="text-xs">More</span>
                 </button>
               </SheetTrigger>
@@ -119,7 +128,7 @@ export default function Navigation({ currentScreen, onNavigate, onManagePin }: N
                           }`}
                           onClick={() => onNavigate(item.id)}
                         >
-                          <Icon className="w-6 h-6 shrink-0" />
+                          <Icon aria-hidden="true" className="w-6 h-6 shrink-0" />
                           <span className="text-xs">{item.label}</span>
                         </Button>
                       </SheetClose>
@@ -134,7 +143,7 @@ export default function Navigation({ currentScreen, onNavigate, onManagePin }: N
                     className="w-full py-6 text-red-600 border-red-100 hover:bg-red-50 hover:text-red-700 transition-colors"
                     onClick={handleLogout}
                   >
-                    <LogOutIcon className="w-5 h-5 mr-2" />
+                    <LogOutIcon aria-hidden="true" className="w-5 h-5 mr-2" />
                     Sign Out
                   </Button>
                   <SheetClose asChild>
@@ -144,7 +153,7 @@ export default function Navigation({ currentScreen, onNavigate, onManagePin }: N
                       onClick={onManagePin}
                     >
                       <span className="flex items-center gap-2">
-                        <LockIcon className="w-4 h-4" />
+                        <LockIcon aria-hidden="true" className="w-4 h-4" />
                         App PIN
                       </span>
                       <span className={`text-xs font-semibold ${pinOn ? 'text-green-700' : 'text-gray-400'}`}>

@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 
 import { db } from "../lib/firebase";
 import { ref, onValue } from 'firebase/database';
+import { useHistoryList } from '../hooks/useHistoryList';
 import { Activity, Droplets, Archive, Clock, CheckCircle, AlertCircle, Beaker } from 'lucide-react';
 
 interface LiveData {
@@ -42,7 +43,11 @@ const BottleFillingMonitor = () => {
   });
 
   const [activeBatch, setActiveBatch] = useState<ActiveFermentationBatch | null>(null);
-  const [recentBatches, setRecentBatches] = useState<BatchReport[]>([]);
+  // Batch reports history (shared hook: same node, mapping, reverse + latest 5)
+  const { items: recentBatches } = useHistoryList('reports/bottling', {
+    reverse: true,
+    limit: 5,
+  }) as { items: BatchReport[] };
 
   // 1. Listen to the Active Fermentation Batch
   // NOTE: FermentationTracker.tsx and Dashboard.tsx both write the active batch to
@@ -71,22 +76,6 @@ const BottleFillingMonitor = () => {
     const unsubscribe = onValue(liveRef, (snapshot) => {
       if (snapshot.exists()) {
         setLiveData(snapshot.val());
-      }
-    });
-    return () => unsubscribe();
-  }, []);
-
-  // 3. Listen to the Batch Reports History
-  useEffect(() => {
-    const reportsRef = ref(db, 'reports/bottling');
-    const unsubscribe = onValue(reportsRef, (snapshot) => {
-      if (snapshot.exists()) {
-        const data = snapshot.val();
-        const formattedBatches = Object.keys(data).map(key => ({
-          id: key,
-          ...data[key]
-        })).reverse().slice(0, 5); // Get the 5 most recent reports
-        setRecentBatches(formattedBatches);
       }
     });
     return () => unsubscribe();
