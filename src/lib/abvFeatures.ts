@@ -21,6 +21,7 @@ export interface AbvModelParams {
   trained_at: string;
   calibration_target_abv?: number;
   calibration_reference?: number[];
+  refractometer_correction?: number;
 }
 
 const fallbackParams: AbvModelParams = {
@@ -41,6 +42,10 @@ const fallbackParams: AbvModelParams = {
   trained_at: "2026-09-20T00:00:00.000Z",
   calibration_target_abv: 12,
   calibration_reference: [7.0, 24.0, 3.5, 6.0],
+  // Provisional: batch #8208 measured 12% (refractometer) vs 16.46% predicted
+  // at 0.59 on an uncorrected reading -> 12/16.46 = 0.73. Re-calibrate after
+  // the next batch's measured ABV gives a second point.
+  refractometer_correction: 0.73,
 };
 
 const params = (modelParams as AbvModelParams | undefined) ?? fallbackParams;
@@ -194,9 +199,11 @@ export function getModelInfo() {
 }
 
 /**
- * Chemistry-first ABV estimate: ABV ≈ (sugar consumed) × factor.
+ * Chemistry-first ABV estimate: ABV ≈ (sugar consumed) × factor × correction.
  * This is the trustworthy path whenever starting Brix (OG) and a current
- * Brix reading are both known — e.g. OG 30 → current 2 ≈ 16.5% at 0.59.
+ * Brix reading are both known — e.g. OG 30 → current 2 ≈ 12.0% at 0.59 with
+ * the 0.73 refractometer correction (uncorrected readings run hot once
+ * alcohol is present; see refractometer_correction).
  * Returns null when either input is missing/invalid so callers can fall
  * back to the sensor-trend model.
  */
@@ -221,7 +228,8 @@ export function predictAbvFromBrixDrop(
   // bogus 0%. The 0.5 tolerance absorbs normal hydrometer noise (Day-0 must
   // legitimately reads drop ≈ 0, which correctly yields 0%).
   if (drop < -0.5) return null;
-  const abv = drop * factor;
+  const correction = asFiniteNumber(params.refractometer_correction) ?? 1;
+  const abv = drop * factor * correction;
   return Math.min(25, Math.max(0, abv));
 }
 
