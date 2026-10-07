@@ -8,7 +8,7 @@ import {
   LocalNotifications,
   type LocalNotificationSchema,
 } from '@capacitor/local-notifications';
-import { onValue, ref, set } from 'firebase/database';
+import { get, ref, remove, update } from 'firebase/database';
 import { auth, db } from './firebase';
 
 const DEVICE_TOKEN_ROOT = 'deviceTokens';
@@ -37,17 +37,43 @@ function notificationFromPush(push: PushNotificationSchema): LocalNotificationSc
 
 async function saveDeviceToken(token: Token) {
   const user = auth.currentUser;
-  if (import.meta.env.DEV) console.log('[push] saveDeviceToken called, user:', user?.uid ?? 'NO USER LOGGED IN');
   if (!user || !db) {
     console.warn('[push] cannot save token — user or db missing', { hasUser: !!user, hasDb: !!db });
     return;
   }
 
-  await set(ref(db, `${DEVICE_TOKEN_ROOT}/${user.uid}/${encodeURIComponent(token.value)}`), {
-    token: token.value,
-    platform: Capacitor.getPlatform(),
-    updatedAt: Date.now(),
+  const devicePath = `${DEVICE_TOKEN_ROOT}/${user.uid}`;
+  const key = encodeURIComponent(token.value);
+
+  // Token rotation: FCM can hand back a new token for the same install, and a
+  // stale sibling key would keep this device receiving pushes forever. One
+  // atomic update — read-then-remove-then-set raced against a concurrent
+  // registration and could resurrect a stale key.
+  const existingSnap = await get(ref(db, devicePath));
+  const staleKeys = Object.keys(existingSnap.val() ?? {}).filter((k) => k !== key);
+
+  await update(ref(db, devicePath), {
+    [key]: {
+      token: token.value,
+      platform: Capacitor.getPlatform(),
+      updatedAt: Date.now(),
+    },
+    ...Object.fromEntries(staleKeys.map((k) => [k, null])),
   });
+}
+
+/**
+ * Drops this account's FCM token(s) from the database. Call on sign-out —
+ * otherwise a shared device keeps delivering the previous user's pushes to
+ * whoever signs in next.
+ */
+export async function clearDeviceTokens(uid: string): Promise<void> {
+  if (!db) return;
+  try {
+    await remove(ref(db, `${DEVICE_TOKEN_ROOT}/${uid}`));
+  } catch (error) {
+    console.warn('[push] failed to clear device tokens', error);
+  }
 }
 
 async function actuallyInitializePushNotifications(): Promise<() => Promise<void>> {
@@ -76,10 +102,8 @@ async function actuallyInitializePushNotifications(): Promise<() => Promise<void
   }
 
   const registration = await PushNotifications.addListener('registration', async (token) => {
-    if (import.meta.env.DEV) console.log('[push] registration event fired, token:', token.value.substring(0, 20) + '...');
     try {
       await saveDeviceToken(token);
-      if (import.meta.env.DEV) console.log('[push] token saved to Firebase successfully');
     } catch (error) {
       console.error('[push] FAILED to save token to Firebase:', error);
     }
@@ -121,14 +145,4 @@ export async function initializePushNotifications(): Promise<() => Promise<void>
     pushInitPromise = actuallyInitializePushNotifications();
   }
   return pushInitPromise;
-}
-
-/**
- * Optional helper for screens that want to observe the NotificationCenter path
- * directly. It keeps the notification list as the source of truth in Firebase.
- */
-export function watchNotificationCenter(onChange: () => void): () => void {
-  if (!db) return () => undefined;
-  const notificationsRef = ref(db, 'notifications');
-  return onValue(notificationsRef, onChange);
 }

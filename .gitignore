@@ -15,3 +15,5 @@ android/app/build
 android/capacitor-cordova-android-plugins/build
 ios/App/DerivedData
 *.log
+# Trainer output — model artifacts must not be committed or served
+public/model_abv/
