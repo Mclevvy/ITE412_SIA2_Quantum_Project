@@ -1,7 +1,7 @@
 // Runnable check for per-batch sorting stats (src/lib/sortingStats.ts).
 // Run: node scripts/checkSorting.ts   (Node >= 23 strips types natively)
 import assert from 'node:assert/strict';
-import { summarizeSorting, sortedKeys, latestEntryKey } from '../src/lib/sortingStats.ts';
+import { summarizeSorting, sortedKeys, latestEntryKey, countsFromKg } from '../src/lib/sortingStats.ts';
 
 // ordering: b10 after b9 (numeric suffix), push-ids lexicographic
 assert.deepEqual(sortedKeys({ b10: { value: 'pass' }, b2: { value: 'pass' }, b9: { value: 'reject' } }),
@@ -36,5 +36,15 @@ assert.equal(summarizeSorting({ b5: { value: 'pass' } }, 'b1'), null);
 
 // empty
 assert.deepEqual(summarizeSorting({}, null), { total: 0, passed: 0, rejected: 0, estimatedWeightG: 0 });
+
+// manual harvest (kg) -> counts; 3.5 kg ripe / 1.4 kg unripe
+assert.deepEqual(countsFromKg(3.5, 1.4), { total: 12445, passed: 7778, rejected: 4667, estimatedWeightG: 4900.2 });
+// round-trips back to the weighed kg even after rounding to whole berries
+const manual = countsFromKg(3.5, 1.4)!;
+assert.ok(Math.abs(manual.estimatedWeightG / 1000 - 4.9) < 0.01);
+// invalid inputs -> null, never a guessed number
+assert.equal(countsFromKg(-1, 2), null);
+assert.equal(countsFromKg(3.5, Number.NaN), null);
+assert.equal(countsFromKg(undefined, 1), null);
 
 console.log('checkSorting: all assertions passed');

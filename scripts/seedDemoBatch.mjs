@@ -6,10 +6,11 @@
  * to `fermentation/history` + `sensorArchive`.
  *
  * SAFETY:
- * - Only EVER writes under fermentation/history and sensorArchive/{key}.
- *   The live batch (fermentation/currentBatch) and live sensor paths are
- *   never touched — Batch #8208 keeps running untouched.
- * - Idempotent: existing batchIds are skipped, so re-runs can't duplicate.
+ * - Demo writes go under fermentation/history and sensorArchive/{key}.
+ *   --harvest touches only fermentation/history/{key}.harvest; --baseline
+ *   touches only fermentation/currentBatch/details.sortingBaseline. Live
+ *   sensor paths are never touched.
+ * - Idempotent: existing demo batchIds are skipped, so re-runs can't duplicate.
  * - Default is --dry-run (prints what WOULD be written, touches nothing).
  *
  * USAGE (PowerShell — plain `VAR=value` prefixes do NOT work here):
@@ -19,8 +20,10 @@
  *   #   $env:SEED_EMAIL="you@example.com"; $env:SEED_PASSWORD="secret"
  *   node scripts\seedDemoBatch.mjs --check
  *   node scripts\seedDemoBatch.mjs --confirm
- *   node scripts\seedDemoBatch.mjs --harvest --batch "Batch #8208" --ripe 3.4 --unripe 1.4
- *   node scripts\seedDemoBatch.mjs --harvest --batch "Batch #8208" --ripe 3.4 --unripe 1.4 --confirm
+ *   node scripts\seedDemoBatch.mjs --harvest --batch "Batch #8208" --ripe 3.5 --unripe 1.4
+ *   node scripts\seedDemoBatch.mjs --harvest --batch "Batch #8208" --ripe 3.5 --unripe 1.4 --confirm
+ *   node scripts\seedDemoBatch.mjs --baseline
+ *   node scripts\seedDemoBatch.mjs --baseline --confirm
  *
  * MODES (choose one):
  *   --dry-run    preview only, no sign-in, writes nothing (default)
@@ -28,9 +31,14 @@
  *   --confirm    write the 4 batches (needs credentials)
  *   --clean-junk list history records missing a batchId (needs credentials);
  *                add --confirm to actually delete them
- *   --harvest   stamp { ripeKg, unripeKg } onto one existing history record,
- *                matched by --batch; add --confirm to write. Re-runs overwrite
- *                the two harvest numbers (the rest of the record is not touched).
+ *   --harvest   stamp { ripeKg, unripeKg } onto batch "<id>" wherever it lives —
+ *                the active batch's details (Fruit Sorting page) and/or its
+ *                history record (Batch Record sheet), matched by --batch. Add
+ *                --confirm to write; only those two numbers change.
+ *   --baseline  set the ACTIVE batch's details.sortingBaseline so the Fruit
+ *                Sorting page stops saying "baseline not captured". Add --key
+ *                <key> to count only entries after that key; default counts the
+ *                whole log. Add --confirm to write.
  *
  * NOTE: these are synthetic batches for presentation purposes. Disclose that
  * to your panel — the data is realistic but generated, not measured.
@@ -170,7 +178,7 @@ function buildBatch(def, index, now) {
 }
 
 function parseArgs(argv) {
-  const args = { dryRun: true, confirm: false, check: false, clean: false, harvest: false, batch: null, ripe: null, unripe: null, email: null, password: null };
+  const args = { dryRun: true, confirm: false, check: false, clean: false, harvest: false, baseline: false, batch: null, ripe: null, unripe: null, key: null, email: null, password: null };
   for (let i = 0; i < argv.length; i += 1) {
     if (argv[i] === "--confirm") {
       args.confirm = true;
@@ -190,7 +198,10 @@ function parseArgs(argv) {
       // Independent of --confirm/--dry-run: it never resets them, so
       // `--harvest ... --confirm` leaves both flags true.
       args.harvest = true;
-    } else if (argv[i] === "--batch") args.batch = argv[++i];
+    } else if (argv[i] === "--baseline") {
+      args.baseline = true;
+    } else if (argv[i] === "--key") args.key = argv[++i];
+    else if (argv[i] === "--batch") args.batch = argv[++i];
     else if (argv[i] === "--ripe") args.ripe = argv[++i];
     else if (argv[i] === "--unripe") args.unripe = argv[++i];
     else if (argv[i] === "--email") args.email = argv[++i];
@@ -202,8 +213,8 @@ function parseArgs(argv) {
     console.error("Conflicting flags: --dry-run and --confirm. Pick one (dry-run is the default).");
     process.exit(1);
   }
-  if ([args.check, args.clean, args.harvest].filter(Boolean).length > 1) {
-    console.error("Conflicting modes: choose one of --check, --clean-junk, --harvest.");
+  if ([args.check, args.clean, args.harvest, args.baseline].filter(Boolean).length > 1) {
+    console.error("Conflicting modes: choose one of --check, --clean-junk, --harvest, --baseline.");
     process.exit(1);
   }
   args.email ??= process.env.SEED_EMAIL ?? null;
@@ -293,8 +304,10 @@ async function main() {
     return;
   }
 
-  // Stamp weighed-harvest numbers onto ONE existing history record, matched by
-  // its batchId. `update` (not `set`) so the rest of the record survives.
+  // Stamp weighed-harvest numbers onto batch "<id>" wherever it lives: the live
+  // batch's details (the Fruit Sorting page reads that) and/or its history
+  // record (the Batch Record sheet reads that). `update` (not `set`), so the
+  // rest of each target survives.
   if (args.harvest) {
     const batchId = typeof args.batch === "string" ? args.batch.trim() : "";
     const rawRipe = args.ripe == null ? "" : String(args.ripe).trim();
@@ -313,12 +326,10 @@ async function main() {
       process.exitCode = 1;
       return;
     }
-    // Child paths, not a `harvest` object: update() then merges, so any sibling
-    // field under harvest survives.
-    const patch = { "harvest/ripeKg": ripeKg, "harvest/unripeKg": unripeKg };
     if (args.dryRun || !args.confirm) {
-      console.log(`\nDRY RUN — nothing written. Would set on the record whose batchId === "${batchId}":`);
-      console.log(`  patch: ${JSON.stringify(patch)}  (only harvest/ripeKg + harvest/unripeKg)`);
+      console.log(`\nDRY RUN — nothing written. Would stamp ${ripeKg} kg ripe / ${unripeKg} kg unripe onto batch "${batchId}" wherever it lives:`);
+      console.log("  · active batch    → fermentation/currentBatch/details/harvest   (if its batchId matches)");
+      console.log("  · history record  → fermentation/history/{key}.harvest          (if its batchId matches)");
       console.log("  Re-run with --confirm (plus credentials) to write.");
       return;
     }
@@ -328,37 +339,107 @@ async function main() {
       return;
     }
     const db = await signInDb(args.email, args.password);
+
+    // Collect every place this batchId lives; each write is verified separately.
+    const targets = [];
+    const details = (await get(ref(db, "fermentation/currentBatch/details"))).val();
+    if (details && details.batchId === batchId) {
+      targets.push({
+        label: "active batch (Fruit Sorting page)",
+        path: "fermentation/currentBatch",
+        patch: { "details/harvest/ripeKg": ripeKg, "details/harvest/unripeKg": unripeKg },
+        harvestPath: "fermentation/currentBatch/details/harvest",
+        batchPath: "fermentation/currentBatch/details/batchId",
+      });
+    }
     const rows = await readAllHistory(db);
     const matches = rows.filter((r) => r.batchId === batchId);
-    if (matches.length === 0) {
-      console.error(`No history record with batchId "${batchId}". Available:`);
+    if (matches.length > 1) {
+      console.error(`Ambiguous: ${matches.length} history records share batchId "${batchId}" (keys: ${matches.map((m) => m.key).join(", ")}). Nothing written.`);
+      process.exitCode = 1;
+      return;
+    }
+    if (matches.length === 1) {
+      targets.push({
+        label: "history record (Batch Record sheet)",
+        path: `fermentation/history/${matches[0].key}`,
+        patch: { "harvest/ripeKg": ripeKg, "harvest/unripeKg": unripeKg },
+        harvestPath: `fermentation/history/${matches[0].key}/harvest`,
+        batchPath: `fermentation/history/${matches[0].key}/batchId`,
+      });
+    }
+    if (targets.length === 0) {
+      console.error(`Batch "${batchId}" is neither the active batch nor in fermentation/history. History:`);
       for (const r of rows) console.log(`  ${r.batchId ?? "(no batchId)"} | key ${r.key}`);
       process.exitCode = 1;
       return;
     }
-    if (matches.length > 1) {
-      console.error(`Ambiguous: ${matches.length} records share batchId "${batchId}" (keys: ${matches.map((m) => m.key).join(", ")}). Nothing written.`);
+    for (const t of targets) {
+      try {
+        await update(ref(db, t.path), t.patch);
+      } catch (e) {
+        console.error(`  FAILED ${t.label}: ${e?.code || e?.message || e}`);
+        process.exitCode = 1;
+        return;
+      }
+      const h = (await get(ref(db, t.harvestPath))).val();
+      const owner = (await get(ref(db, t.batchPath))).val();
+      // Assert the owner too: if it vanished between read and write, update()
+      // recreates an orphan {harvest} node that would otherwise verify clean.
+      if (!h || h.ripeKg !== ripeKg || h.unripeKg !== unripeKg || owner !== batchId) {
+        console.error(`  VERIFY FAILED — ${t.harvestPath} = ${JSON.stringify(h ?? null)} (owner ${JSON.stringify(owner ?? null)}).`);
+        process.exitCode = 1;
+        return;
+      }
+      console.log(`  WROTE ${t.harvestPath} = ${JSON.stringify(h)} — ${t.label}.`);
+    }
+    console.log("Done.");
+    return;
+  }
+
+  // Backfill the sorting baseline on the LIVE batch: a batch started before the
+  // feature has no details.sortingBaseline, so the Fruit Sorting page can never
+  // attribute counts. `""` = whole log (count every entry), else a key to slice
+  // after. Only details/sortingBaseline is written.
+  if (args.baseline) {
+    const key = args.key == null ? "" : String(args.key).trim();
+    const patch = { "details/sortingBaseline": { key } };
+    if (args.dryRun || !args.confirm) {
+      console.log("\nDRY RUN — nothing written. Would set fermentation/currentBatch/details/sortingBaseline:");
+      console.log(`  ${JSON.stringify(patch)}  (empty key = count the whole log)`);
+      console.log("  Re-run with --confirm (plus credentials) to write.");
+      return;
+    }
+    if (!args.email || !args.password) {
+      console.error("Missing credentials. Pass --email/--password (or set SEED_EMAIL/SEED_PASSWORD).");
       process.exitCode = 1;
       return;
     }
-    const key = matches[0].key;
+    const db = await signInDb(args.email, args.password);
+    // Guard: update() would CREATE the node on a batch that isn't running,
+    // leaving an orphan baseline behind after the batch ends.
+    const detailsSnap = await get(ref(db, "fermentation/currentBatch/details"));
+    if (!detailsSnap.exists()) {
+      console.error("No active batch (fermentation/currentBatch/details is empty). Nothing written.");
+      process.exitCode = 1;
+      return;
+    }
     try {
-      await update(ref(db, `fermentation/history/${key}`), patch);
+      await update(ref(db, "fermentation/currentBatch"), patch);
     } catch (e) {
-      console.error(`  FAILED harvest on fermentation/history/${key}: ${e?.code || e?.message || e}`);
+      console.error(`  FAILED baseline: ${e?.code || e?.message || e}`);
       process.exitCode = 1;
       return;
     }
-    const verify = (await get(ref(db, `fermentation/history/${key}`))).val();
-    const h = verify && verify.harvest;
-    // Assert batchId too: if the record vanished between read and write,
-    // update() recreates it as an orphan {harvest} node that would otherwise pass.
-    if (!verify || verify.batchId !== batchId || !h || h.ripeKg !== ripeKg || h.unripeKg !== unripeKg) {
-      console.error(`  VERIFY FAILED — fermentation/history/${key} = ${JSON.stringify(verify ?? null)}. Nothing else written.`);
+    const verify = (await get(ref(db, "fermentation/currentBatch/details/sortingBaseline"))).val();
+    // "" survives RTDB; compare on the key we meant to write.
+    if (!verify || verify.key !== key) {
+      console.error(`  VERIFY FAILED — details/sortingBaseline = ${JSON.stringify(verify ?? null)}.`);
       process.exitCode = 1;
       return;
     }
-    console.log(`  WROTE fermentation/history/${key}.harvest = ${JSON.stringify(h)} (batchId "${batchId}").`);
+    const batchId = detailsSnap.val()?.batchId ?? "the active batch";
+    console.log(`  WROTE fermentation/currentBatch/details/sortingBaseline = ${JSON.stringify(verify)} (${batchId}).`);
     console.log("Done.");
     return;
   }

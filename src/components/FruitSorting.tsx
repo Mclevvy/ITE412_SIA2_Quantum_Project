@@ -1,18 +1,23 @@
 import { useEffect, useMemo, useState } from "react";
-import { onValue, ref } from "firebase/database";
+import { onValue, ref, update } from "firebase/database";
 import { db } from "../lib/firebase";
 import { sorterDb } from "../lib/sorterFirebase";
-import { summarizeSorting, type SorterEntry } from "../lib/sortingStats";
+import { summarizeSorting, countsFromKg, latestEntryKey, type SorterEntry } from "../lib/sortingStats";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Badge } from "./ui/badge";
+import { Button } from "./ui/button";
+import { Input } from "./ui/input";
+import { Label } from "./ui/label";
 import { CheckCircle2Icon, LayersIcon, PaletteIcon, ScaleIcon, XCircleIcon } from "lucide-react";
 import { motion } from "motion/react";
 
 type BatchDetails = {
   batchId?: string;
   /** Snapshot of the sorting log position when the batch started.
-   *  Absent = not captured; { key: null } = log was empty; { key: "b5" } = slice after b5. */
-  sortingBaseline?: { key?: string | null };
+   *  Absent = not captured; { key: "" } = log was empty; { key: "b5" } = slice after b5. */
+  sortingBaseline?: { key?: string };
+  /** Hand-weighed harvest (kg) for a batch sorted manually — no machine log. */
+  harvest?: { ripeKg?: unknown; unripeKg?: unknown };
 };
 
 function formatWeight(grams: number): string {
@@ -25,6 +30,11 @@ export default function FruitSorting() {
   const [batchError, setBatchError] = useState(false);
   const [entries, setEntries] = useState<Record<string, SorterEntry> | null>(null);
   const [sorterError, setSorterError] = useState(false);
+  const [ripeInput, setRipeInput] = useState("");
+  const [unripeInput, setUnripeInput] = useState("");
+  const [formOpen, setFormOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   // Active batch: its id and the sorting baseline captured at Start Batch.
   useEffect(() => {
@@ -58,12 +68,24 @@ export default function FruitSorting() {
   // A batch with no baseline field is "not captured"; a baseline with key null
   // means the log was empty then, so every entry belongs to this batch.
   const baselinePresent = batch?.sortingBaseline !== undefined;
-  const baselineKey = batch?.sortingBaseline?.key ?? null;
+  const rawBaselineKey = batch?.sortingBaseline?.key;
+  const baselineKey = typeof rawBaselineKey === "string" && rawBaselineKey !== "" ? rawBaselineKey : null;
 
-  const summary = useMemo(
+  const liveSummary = useMemo(
     () => (entries !== null && baselinePresent ? summarizeSorting(entries, baselineKey) : null),
     [entries, baselinePresent, baselineKey]
   );
+
+  // A batch sorted by hand has no machine log, but the weighed harvest is real:
+  // convert kg → berries so the page still reports the actual result.
+  const harvest = batch?.harvest;
+  const ripeKg = typeof harvest?.ripeKg === "number" && Number.isFinite(harvest.ripeKg) ? harvest.ripeKg : null;
+  const unripeKg = typeof harvest?.unripeKg === "number" && Number.isFinite(harvest.unripeKg) ? harvest.unripeKg : null;
+  const manualSummary = useMemo(() => countsFromKg(ripeKg, unripeKg), [ripeKg, unripeKg]);
+
+  // A recorded hand-weighed harvest means the batch was sorted by hand, so it
+  // IS this batch's result — it wins over a leftover/empty machine log.
+  const summary = manualSummary ?? liveSummary;
 
   const blockedMessage = !batchLoaded
     ? "Loading batch…"
@@ -71,15 +93,68 @@ export default function FruitSorting() {
       ? "Couldn't read the active batch — check your connection."
       : !batch
         ? "No active batch — start one in the Tracker."
-        : !sorterDb
-          ? "Sorter not available — check the VITE_SORTER_* keys in .env."
-          : sorterError
-            ? "Sorter unreachable — check the bignaysorter connection."
-            : !baselinePresent
-              ? "Baseline not captured for this batch (started while the sorter was offline)."
-              : entries !== null && summary === null
-                ? "Sorting log was reset — counts can't be attributed to this batch."
-                : null;
+        : summary
+          ? null
+          : !sorterDb
+            ? "Sorter not available — check the VITE_SORTER_* keys in .env."
+            : sorterError
+              ? "Sorter unreachable — check the bignaysorter connection."
+              : !baselinePresent
+                ? "Baseline not captured for this batch (started while the sorter was offline)."
+                : entries === null
+                  ? "Loading sorter data…"
+                  : "Sorting log was reset — counts can't be attributed to this batch.";
+
+  // Pre-flight: is the sorter reachable BEFORE starting a batch? Independent of
+  // the batch, so you can check readiness on a fresh screen.
+  const sorterStatus = !sorterDb
+    ? { label: "Sorter not configured (VITE_SORTER_* missing)", tone: "bad" }
+    : sorterError
+      ? { label: "Sorter unreachable — check the bignaysorter connection", tone: "bad" }
+      : entries === null
+        ? { label: "Checking sorter…", tone: "muted" }
+        : {
+            label: `Sorter connected · ${Object.keys(entries).length} entries · last ${latestEntryKey(entries) ?? "none"}`,
+            tone: "good",
+          };
+
+  const openEdit = () => {
+    setRipeInput(ripeKg !== null ? String(ripeKg) : "");
+    setUnripeInput(unripeKg !== null ? String(unripeKg) : "");
+    setSaveError(null);
+    setFormOpen(true);
+  };
+
+  const saveManualHarvest = async () => {
+    const ripeRaw = ripeInput.trim();
+    const unripeRaw = unripeInput.trim();
+    const ripe = Number(ripeRaw);
+    const unripe = Number(unripeRaw);
+    // Guard on the trimmed string too: Number(" ") is 0, so a blank field would
+    // otherwise save a fabricated 0 kg.
+    if (!ripeRaw || !unripeRaw || !Number.isFinite(ripe) || !Number.isFinite(unripe) || ripe < 0 || unripe < 0) {
+      setSaveError("Enter both weights as numbers ≥ 0 (kg).");
+      return;
+    }
+    if (!batch) {
+      setSaveError("No active batch.");
+      return;
+    }
+    setSaving(true);
+    setSaveError(null);
+    try {
+      // Child paths so update() merges and leaves the rest of details intact.
+      await update(ref(db, "fermentation/currentBatch"), {
+        "details/harvest/ripeKg": ripe,
+        "details/harvest/unripeKg": unripe,
+      });
+      setFormOpen(false);
+    } catch {
+      setSaveError("Couldn't save — check your connection.");
+    } finally {
+      setSaving(false);
+    }
+  };
 
   return (
     <div className="p-4 space-y-4 pb-20 max-w-xl mx-auto">
@@ -92,6 +167,21 @@ export default function FruitSorting() {
           </p>
         </div>
         <PaletteIcon className="w-6 h-6 text-primary" />
+      </div>
+
+      <div className="flex justify-center">
+        <Badge
+          variant="outline"
+          className={
+            sorterStatus.tone === "good"
+              ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+              : sorterStatus.tone === "bad"
+                ? "bg-red-50 text-[#B91C1C] border-red-200"
+                : "bg-secondary text-secondary-foreground border-border"
+          }
+        >
+          {sorterStatus.label}
+        </Badge>
       </div>
 
       {blockedMessage ? (
@@ -154,12 +244,83 @@ export default function FruitSorting() {
                   </Badge>
                 </div>
                 <p className="text-xs text-muted-foreground pt-2 border-t border-border mt-2">
-                  Weight = passed × 0.45 g (ripe) + rejected × 0.30 g (unripe). Tune in `sortingStats.ts`.
+                  Weight = passed × 0.45 g (ripe) + rejected × 0.30 g (unripe). Tune in sortingStats.ts.
                 </p>
               </CardContent>
             </Card>
           </motion.div>
         )
+      )}
+
+      {batch && (manualSummary === null || formOpen) && (
+        <Card className="border-dashed">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm flex items-center gap-2">
+              <ScaleIcon className="w-4 h-4 text-primary" />
+              Log manual sort
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <p className="text-xs text-muted-foreground">
+              Sorted by hand? Enter the weighed kilos for {batch.batchId ?? "this batch"} — the page reports the equivalent berries.
+            </p>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <Label htmlFor="ripe-kg" className="text-xs">Ripe (kg)</Label>
+                <Input
+                  id="ripe-kg"
+                  type="number"
+                  inputMode="decimal"
+                  min="0"
+                  step="0.1"
+                  placeholder="3.5"
+                  value={ripeInput}
+                  onChange={(e) => setRipeInput(e.target.value)}
+                />
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="unripe-kg" className="text-xs">Unripe (kg)</Label>
+                <Input
+                  id="unripe-kg"
+                  type="number"
+                  inputMode="decimal"
+                  min="0"
+                  step="0.1"
+                  placeholder="1.4"
+                  value={unripeInput}
+                  onChange={(e) => setUnripeInput(e.target.value)}
+                />
+              </div>
+            </div>
+            {saveError && <p className="text-xs text-destructive">{saveError}</p>}
+            <div className="flex gap-2">
+              <Button size="sm" onClick={saveManualHarvest} disabled={saving}>
+                {saving ? "Saving…" : "Save"}
+              </Button>
+              {manualSummary !== null && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  disabled={saving}
+                  onClick={() => {
+                    setFormOpen(false);
+                    setSaveError(null);
+                  }}
+                >
+                  Cancel
+                </Button>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {manualSummary !== null && !formOpen && (
+        <div className="text-center">
+          <Button variant="link" size="sm" onClick={openEdit}>
+            Change harvest
+          </Button>
+        </div>
       )}
 
       <p className="text-xs text-muted-foreground text-center">

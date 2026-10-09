@@ -66,7 +66,8 @@ project settings — a build without them produces an app that fails at startup
 on purpose. Seed scripts (`npm run seed:demo` etc.) load the same `.env`
 automatically via `node --env-file-if-exists=.env` (Node >= 22.9).
 
-Backfill a batch's weighed harvest (rendered in the Batch Record sheet, and only there): `npm run seed:harvest -- --batch "Batch #8208" --ripe 3.4 --unripe 1.4` — dry-run by default, add `--confirm` to write. It stamps only `fermentation/history/{key}.harvest = { ripeKg, unripeKg }`; berry counts are deliberately not stored (they are `kg ÷ 0.45 / 0.30` and would drift).
+Backfill a batch's weighed harvest: `npm run seed:harvest -- --batch "Batch #8208" --ripe 3.5 --unripe 1.4` — dry-run by default, add `--confirm` to write. It stamps only `harvest = { ripeKg, unripeKg }` onto the batch **wherever it lives**: the active batch's `fermentation/currentBatch/details/harvest` (rendered on the **Fruit Sorting** page) and/or its `fermentation/history/{key}.harvest` (rendered in the **Batch Record** sheet). Berry counts are deliberately not stored — they are `kg ÷ 0.45` (ripe) / `÷ 0.30` (unripe) and would drift.
+- A batch sorted **by hand** has no machine log, so the Fruit Sorting page falls back to `details.harvest` and reports the equivalent counts (`kg × 1000 ÷ g-per-berry`) as that batch's result; a recorded harvest outranks a leftover/empty machine log.
 
 A simulator can render the UI, but native push registration requires a physical device and valid Firebase/APNs/FCM credentials. The web build continues to work without native notification permissions.
 
@@ -101,7 +102,8 @@ A simulator can render the UI, but native push registration requires a physical 
 The Fruit Sorting page reads a **different** Firebase project, read-only — configured via `VITE_SORTER_*` (see `.env.example`). `src/lib/sorterFirebase.ts` is deliberately tolerant: an absent sorter config degrades this one page, it never crashes the app.
 
 - Data: `bignay_sorter/{key} = { value: "pass" | "reject" }`, an append-only log; `sorter/totalCount` is ignored (derivable, and can drift).
-- Per-batch counts are a **delta**: `startBatch` snapshots the log's last key into `fermentation/currentBatch/details.sortingBaseline` (`{ key: null }` = log was empty; the field absent = not captured, shown as such rather than guessed).
+- Per-batch counts are a **delta**: `startBatch` snapshots the log's last key into `fermentation/currentBatch/details.sortingBaseline` (`{ key: "" }` = log was empty; the field absent = not captured, shown as such rather than guessed). The sentinel is `""`, **never `null`** — Realtime Database stores `null` as a delete, so a null key makes the whole field vanish and read back as "not captured".
+- A batch started before that field existed can be backfilled while it runs: `npm run seed:baseline` (dry-run) / `-- --confirm` (write). Add `--key <key>` to count only entries after that key; the default counts the whole log. It writes only `fermentation/currentBatch/details/sortingBaseline` and refuses if no batch is active.
 - `src/lib/sortingStats.ts` (`summarizeSorting`) is pure and checked by `npm run check:sorting`; ordering handles `b1…b10` via the numeric suffix.
 - Estimated weight assumes **0.45 g per passed (ripe)** and **0.30 g per rejected (unripe)** berry — edit the constants in `sortingStats.ts`.
 - Assumes the log is append-only and never cleared; if it is cleared, the batch collapses to "counts can't be attributed" rather than a wrong number.

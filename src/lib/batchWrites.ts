@@ -175,20 +175,21 @@ export async function startBatch({
   // showing a wrong count. A missing baseline must not stop the batch starting.
   // ponytail: cross-project read on Start Batch; move to a background retry if
   // it ever adds noticeable latency.
-  let sortingBaseline: { key: string | null } | undefined;
+  // "" = the log was empty at start (this batch owns every later entry).
+  // RTDB stores null as a delete, so a null key would make the field vanish and
+  // read back as "not captured" — the sentinel must never be null.
+  let sortingBaseline: { key: string } | undefined;
   if (sorterDb) {
     try {
       const sorterSnap = await get(ref(sorterDb, "bignay_sorter"));
-      if (!sorterSnap.exists()) {
-        sortingBaseline = { key: null }; // log empty at start → this batch owns every later entry
-      } else {
-        const raw = sorterSnap.val();
+      const raw = sorterSnap.exists() ? sorterSnap.val() : null;
+      if (raw === null) {
+        sortingBaseline = { key: "" };
+      } else if (typeof raw === "object" && !Array.isArray(raw)) {
         // A non-object node is a *broken* log, not an empty one: leave the field
         // absent so the page says "baseline not captured", never attribute the
         // whole historical log to this batch.
-        if (raw && typeof raw === "object" && !Array.isArray(raw)) {
-          sortingBaseline = { key: latestEntryKey(raw as Record<string, SorterEntry>) };
-        }
+        sortingBaseline = { key: latestEntryKey(raw as Record<string, SorterEntry>) ?? "" };
       }
     } catch {
       // leave undefined — surfaced by the UI as "baseline not captured"

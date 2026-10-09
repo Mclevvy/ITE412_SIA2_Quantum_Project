@@ -60,6 +60,7 @@
             "seed:check": "node --env-file-if-exists=.env scripts/seedDemoBatch.mjs --check",
             "seed:clean": "node --env-file-if-exists=.env scripts/seedDemoBatch.mjs --clean-junk",
             "seed:demo:write": "node --env-file-if-exists=.env scripts/seedDemoBatch.mjs --confirm",
-            "seed:harvest": "node --env-file-if-exists=.env scripts/seedDemoBatch.mjs --harvest"
+            "seed:harvest": "node --env-file-if-exists=.env scripts/seedDemoBatch.mjs --harvest",
+            "seed:baseline": "node --env-file-if-exists=.env scripts/seedDemoBatch.mjs --baseline"
       }
 }

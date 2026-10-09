@@ -81,3 +81,25 @@ export function summarizeSorting(
     estimatedWeightG: passed * PASS_WEIGHT_G + rejected * REJECT_WEIGHT_G,
   };
 }
+
+/**
+ * Inverse of the weight estimate: the berry counts a recorded (hand-weighed)
+ * harvest implies. For batches sorted manually — no machine log exists, but the
+ * weighed kg is real data. Returns null for missing/negative/non-numeric kg.
+ */
+export function countsFromKg(ripeKg: unknown, unripeKg: unknown): SortSummary | null {
+  if (
+    typeof ripeKg !== "number" || !Number.isFinite(ripeKg) || ripeKg < 0 ||
+    typeof unripeKg !== "number" || !Number.isFinite(unripeKg) || unripeKg < 0
+  ) {
+    return null;
+  }
+  const passed = Math.round((ripeKg * 1000) / PASS_WEIGHT_G);
+  const rejected = Math.round((unripeKg * 1000) / REJECT_WEIGHT_G);
+  return {
+    total: passed + rejected,
+    passed,
+    rejected,
+    estimatedWeightG: passed * PASS_WEIGHT_G + rejected * REJECT_WEIGHT_G,
+  };
+}
