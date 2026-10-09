@@ -46,6 +46,25 @@ The `notification` fields are used by FCM/APNs for background delivery. The `dat
   Firmware must sign in with a device account before deploying — reopening a
   path is a consciously-accepted exception, not the default.
 
+### App Check (optional hardening)
+
+`src/lib/firebase.ts` initializes App Check **only** when `VITE_RECAPTCHA_SITE_KEY`
+is set in `.env`. Unset, App Check is off and nothing in the app changes.
+Two optional vars exist in `.env.example`: `VITE_RECAPTCHA_SITE_KEY` (web
+reCAPTCHA v3 site key) and `VITE_APPCHECK_DEBUG_TOKEN` (local dev only).
+
+1. Firebase Console → **App Check** → **Apps** → register the web app with
+   reCAPTCHA v3 and copy the site key.
+2. Put it in `.env` as `VITE_RECAPTCHA_SITE_KEY`.
+3. For local dev, mint a debug token in the App Check console and set
+   `VITE_APPCHECK_DEBUG_TOKEN` (only read under `import.meta.env.DEV`).
+4. Enable enforcement per-service in the App Check console — not before.
+
+**Caveat:** enforcing on the Realtime Database blocks *every* client that
+cannot send an App Check token, including any ESP/microcontroller sensor node
+writing `sensors` / `deviceStatus` without one. Enforce only once every writer
+can attest.
+
 ## Run and build
 
 ```bash
