@@ -40,6 +40,8 @@ interface BatchDetails {
   initialBrix?: unknown;
   /** Declared finish target; archived as `targetBrix` so the rubric can use it. */
   targetBrix?: unknown;
+  /** Weighed fruit-sort harvest (kg); archived so Reports can show it. */
+  harvest?: { ripeKg?: unknown; unripeKg?: unknown };
 }
 
 interface EndBatchInput {
@@ -287,6 +289,11 @@ export async function endBatch({
       completedAt,
       finalYield: computeFinalYield(details?.initialVolume),
       fruitsUsed: (details?.fruitsUsed as string) || "Unknown",
+      // Weighed harvest (kg) from the Fruit Sorting page. It lives in the
+      // details node this update clears below, so it has to be copied into the
+      // archive here or it is destroyed when the batch ends — Reports' Batch
+      // Record sheet reads report.harvest to show the ripe/unripe/total row.
+      ...(details?.harvest ? { harvest: details.harvest } : {}),
       // Achieved (measured) Brix — NOT the target. Reports & Analytics plots
       // this as "Final Brix" and grades quality from it.
       targetBrixAchieved: fixed(achievedBrix),
