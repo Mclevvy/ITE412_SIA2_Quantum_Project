@@ -19,6 +19,8 @@ import { get, push, ref, update } from "firebase/database";
 import type { Database } from "firebase/database";
 import { predictAbvFromBrixDrop, resolveInitialBrix } from "./abvFeatures";
 import { toPoints } from "./sensorFormat";
+import { isSorterConfigured, sorterDb } from "./sorterFirebase";
+import { latestEntryKey, type SorterEntry } from "./sortingStats";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -167,6 +169,23 @@ export async function startBatch({
 }: StartBatchInput): Promise<void> {
   const startDate = new Date().toLocaleDateString();
 
+  // Best-effort: record where the sorting log stands, so this batch's fruit
+  // counts can be diffed from it. A failed read leaves the field ABSENT (never
+  // zero) — the Fruit Sorting page then says "baseline not captured" instead of
+  // showing a wrong count. A missing baseline must not stop the batch starting.
+  // ponytail: cross-project read on Start Batch; move to a background retry if
+  // it ever adds noticeable latency.
+  let sortingBaseline: { key: string | null } | undefined;
+  if (isSorterConfigured && sorterDb) {
+    try {
+      const sorterSnap = await get(ref(sorterDb, "bignay_sorter"));
+      const entries = sorterSnap.exists() ? (sorterSnap.val() as Record<string, SorterEntry>) : {};
+      sortingBaseline = { key: latestEntryKey(entries) };
+    } catch {
+      // leave undefined — surfaced by the UI as "baseline not captured"
+    }
+  }
+
   await update(ref(db), {
     "fermentation/currentBatch": {
       details: {
@@ -178,6 +197,7 @@ export async function startBatch({
         initialBrix,
         startDate,
         startedAt: Date.now(), // numeric timestamp, used to schedule the first sugar-test reminder
+        ...(sortingBaseline ? { sortingBaseline } : {}),
       },
       stages: [
         { id: 1, name: "Sorting", status: "completed", date: startDate },
