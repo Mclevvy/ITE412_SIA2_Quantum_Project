@@ -125,10 +125,16 @@ export function useBatchActions(live: DashboardLive) {
     const now = live.getServerNow();
     const sugarCurrentRef = ref(db, 'sensors/sugar/current');
 
-    // Archive the previous reading (if any) before overwriting it
+    // Archive the previous reading (if any) before overwriting it — but never
+    // a soft-sensor estimate, which is model output, not a measurement.
     const prevSnap = await get(sugarCurrentRef);
     const prev = prevSnap.exists() ? prevSnap.val() : null;
-    if (prev && typeof prev.time === 'number' && typeof prev.brix === 'number') {
+    if (
+      prev &&
+      typeof prev.time === 'number' &&
+      typeof prev.brix === 'number' &&
+      prev.source !== 'predicted'
+    ) {
       await push(ref(db, 'sensors/sugar/history'), {
         brix: Number(prev.brix),
         time: Number(prev.time),

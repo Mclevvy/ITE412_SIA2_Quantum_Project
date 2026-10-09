@@ -39,7 +39,7 @@ const finite = (v: Num): number | null =>
 export function buildPoints(
   args: { startedAt?: Num; og?: Num; targetBrix?: Num },
   history: Record<string, { brix?: Num; time?: Num }> | null | undefined,
-  current?: { brix?: Num; time?: Num } | null
+  current?: { brix?: Num; time?: Num; source?: Num } | null
 ): Point[] {
   const pts: Point[] = [];
   const startedAt = finite(args.startedAt);
@@ -51,7 +51,9 @@ export function buildPoints(
     if (brix !== null && t !== null) pts.push({ t, brix });
   };
   if (history) for (const key of Object.keys(history)) add(history[key]);
-  add(current);
+  // The soft-sensor auto-log writes its own estimate into `current` for the
+  // dashboard; feeding it back in would make the fit validate its own output.
+  if (current?.source !== 'predicted') add(current);
   return pts.sort((a, b) => a.t - b.t);
 }
 

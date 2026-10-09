@@ -74,6 +74,13 @@ export function useDashboardLive() {
   const lastNotifiedPh = useRef<number | null>(null);
   const lastNotifiedBrix = useRef<number | null>(null);
   const sugarReminderNotifiedRef = useRef<boolean>(false);
+  // Instrument + provenance of the current Brix reading (state, not a ref:
+  // the estimatedAbv memo must recompute when they change).
+  const [sugarInstrumentNow, setSugarInstrumentNow] = useState<string | null>(null);
+  const [brixSource, setBrixSource] = useState<string | null>(null);
+  // When the operator last actually measured (never a soft-sensor estimate):
+  // the sugar-test reminder must not be silenced by our own predictions.
+  const [lastManualBrixAt, setLastManualBrixAt] = useState<number | null>(null);
 
   const dbReady = !!db;
 
@@ -209,10 +216,23 @@ export function useDashboardLive() {
     const sugarCurrentRef = ref(database, "sensors/sugar/current");
     unsubscribers.push(onValue(sugarCurrentRef, (snap) => {
       const v = snap.val();
-      if (!v) { setBrixNow(null); return; }
+      if (!v) {
+        setBrixNow(null);
+        setSugarInstrumentNow(null);
+        setBrixSource(null);
+        setLastManualBrixAt(null);
+        return;
+      }
 
       const brixVal = typeof v.brix === "number" ? v.brix : null;
+      setSugarInstrumentNow(typeof v.instrument === "string" ? v.instrument : null);
+      const source = typeof v.source === "string" ? v.source : null;
+      setBrixSource(source);
       setBrixNow(brixVal);
+
+      if (source !== "predicted" && typeof v.time === "number") {
+        setLastManualBrixAt(v.time);
+      }
 
       if (brixVal !== null) checkAndTriggerNotification('brix', brixVal);
 
@@ -268,10 +288,12 @@ export function useDashboardLive() {
 
   // Reminds the owner to measure sugar again every SUGAR_TEST_INTERVAL_DAYS (14) days.
   const daysSinceSugarTest = useMemo(() => {
-    const reference = updatedAt ?? (typeof activeBatchDetails?.startedAt === 'number' ? activeBatchDetails.startedAt : null);
+    const reference =
+      lastManualBrixAt ??
+      (typeof activeBatchDetails?.startedAt === 'number' ? activeBatchDetails.startedAt : null);
     if (!reference) return null;
     return Math.floor((Date.now() - reference) / (24 * 60 * 60 * 1000));
-  }, [updatedAt, activeBatchDetails]);
+  }, [lastManualBrixAt, activeBatchDetails]);
 
   const sugarTestDue = isBatchActive && daysSinceSugarTest !== null && daysSinceSugarTest >= SUGAR_TEST_INTERVAL_DAYS;
 
@@ -316,8 +338,12 @@ export function useDashboardLive() {
     // started before OG capture existed (no initialBrix on record).
     const ogBrix = resolveInitialBrix(activeBatchDetails);
     if (ogBrix !== null && brixNow !== null) {
-      const chemistry = predictAbvFromBrixDrop(ogBrix, brixNow);
-      if (chemistry !== null) return { value: chemistry, basis: 'measured' as const };
+      const chemistry = predictAbvFromBrixDrop(ogBrix, brixNow, sugarInstrumentNow ?? undefined);
+      if (chemistry !== null) {
+        // Same arithmetic, different provenance: a soft-sensor estimate must
+        // never be labelled "measured".
+        return { value: chemistry, basis: brixSource === 'predicted' ? 'soft' as const : 'measured' as const };
+      }
     }
     if (tempNow === null || phNow === null || pressureNow === null) return null;
     const startedAt = typeof activeBatchDetails?.startedAt === "number" ? activeBatchDetails.startedAt : null;
@@ -333,7 +359,7 @@ export function useDashboardLive() {
       }),
       basis: 'estimated' as const,
     };
-  }, [activeBatchDetails, isBatchActive, brixNow, phNow, pressureNow, tempNow]);
+  }, [activeBatchDetails, isBatchActive, brixNow, phNow, pressureNow, tempNow, sugarInstrumentNow, brixSource]);
 
   // Data-quality flag: a current reading above OG means a logging or
   // instrument error — the usual causes are an uncorrected refractometer
@@ -359,6 +385,9 @@ export function useDashboardLive() {
     setBrixNow(null);
     setPressureNow(null);
     setUpdatedAt(null);
+    setSugarInstrumentNow(null);
+    setBrixSource(null);
+    setLastManualBrixAt(null);
     sugarReminderNotifiedRef.current = false;
   };
 
@@ -373,6 +402,7 @@ export function useDashboardLive() {
     dbReady,
     tempNow,
     brixNow,
+    brixSource,
     phNow,
     pressureNow,
     updatedAt,

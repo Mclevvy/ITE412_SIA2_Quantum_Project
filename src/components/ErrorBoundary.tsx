@@ -31,15 +31,15 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
     if (this.state.hasError) {
       return (
         <div className="flex flex-col items-center justify-center py-24 px-6 text-center">
-          <p className="font-bold text-gray-900">Something went wrong here</p>
-          <p className="text-sm text-gray-500 mt-1">
+          <p className="font-bold text-foreground">Something went wrong here</p>
+          <p className="text-sm text-muted-foreground mt-1">
             The {this.props.screenName ?? "screen"} failed to load. Your data is safe —
             try reloading, and if it persists, check the latest entries for bad data.
           </p>
           <button
             type="button"
             onClick={() => window.location.reload()}
-            className="mt-4 px-5 py-2.5 rounded-full bg-[#8B1538] hover:bg-[#6B1028] text-white text-sm font-medium transition-colors"
+            className="mt-4 px-5 py-2.5 rounded-full bg-primary hover:bg-primary/90 text-primary-foreground text-sm font-medium transition-colors"
           >
             Reload app
           </button>

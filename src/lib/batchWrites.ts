@@ -206,7 +206,7 @@ export async function endBatch({
   // Read the raw per-reading series BEFORE anything is cleared. Without the
   // archive only coarse averages survive, and this is the last point where
   // the batch's trend data exists.
-  const [phSnap, tempSnap, pressureSnap, sugarSnap, predictionSnap, targetSnap] = await Promise.all([
+  const [phSnap, tempSnap, pressureSnap, sugarSnap, predictionSnap, targetSnap, hydroSnap] = await Promise.all([
     get(ref(db, "sensors/history/ph")),
     get(ref(db, "sensors/history/temperature")),
     get(ref(db, "sensors/history/pressurePSI")),
@@ -215,6 +215,9 @@ export async function endBatch({
     // The declared target lives in the node this write clears, so it has to be
     // captured here — without it the accuracy log has nothing to grade against.
     get(ref(db, "fermentation/currentBatch/details/targetBrix")),
+    // Hydrometer-vs-model checks are also cleared with the batch; without
+    // archiving them the per-batch record loses its manual quality events.
+    get(ref(db, "fermentation/currentBatch/hydrometerChecks")),
   ]);
 
   const sugarHistoryVal = sugarSnap.exists() ? sugarSnap.val() : null;
@@ -275,6 +278,7 @@ export async function endBatch({
       temperature: tempSnap.exists() ? tempSnap.val() : null,
       pressurePSI: pressureSnap.exists() ? pressureSnap.val() : null,
       sugarHistory: sugarHistoryVal,
+      hydrometerChecks: hydroSnap.exists() ? hydroSnap.val() : null,
     },
     "fermentation/currentBatch": null,
     "sensors/history": null,

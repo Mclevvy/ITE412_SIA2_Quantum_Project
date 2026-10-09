@@ -17,7 +17,12 @@ import {
   FlaskConicalIcon
 } from 'lucide-react';
 
-import * as tf from '@tensorflow/tfjs';
+// Only the tfjs pieces this screen uses — see PredictiveInsights for why the
+// `@tensorflow/tfjs` umbrella import was replaced (it dragged in converter/data).
+import { tensor2d, type Tensor } from '@tensorflow/tfjs-core';
+import { loadLayersModel, type LayersModel } from '@tensorflow/tfjs-layers';
+import '@tensorflow/tfjs-backend-webgl';
+import '@tensorflow/tfjs-backend-cpu';
 import { db } from '../lib/firebase';
 import { ref, onValue } from 'firebase/database';
 import { useHistoryList } from '../hooks/useHistoryList';
@@ -48,10 +53,10 @@ export default function FermentationTracker() {
   const [currentPh, setCurrentPh] = useState<number | null>(null);
   // Sugar soft sensor inputs: the batch's logged tests + the latest reading.
   const [sugarHistory, setSugarHistory] = useState<Record<string, { brix?: unknown; time?: unknown }> | null>(null);
-  const [sugarCurrent, setSugarCurrent] = useState<{ brix: number; time: number } | null>(null);
+  const [sugarCurrent, setSugarCurrent] = useState<{ brix: number; time: number; source?: string | null } | null>(null);
   const [daysSource, setDaysSource] = useState<'curve' | 'model' | 'linear'>('linear');
   
-  const [model, setModel] = useState<tf.LayersModel | null>(null);
+  const [model, setModel] = useState<LayersModel | null>(null);
   const [modelError, setModelError] = useState(false);
   const [timeRemaining, setTimeRemaining] = useState<string>("Initializing...");
   const [estDate, setEstDate] = useState<string>("--");
@@ -64,7 +69,7 @@ export default function FermentationTracker() {
   useEffect(() => {
     async function loadModel() {
       try {
-        const m = await tf.loadLayersModel('/model_master/model.json');
+        const m = await loadLayersModel('/model_master/model.json');
         setModel(m);
       } catch (e) {
         console.warn("AI Model not found. Check public/model_master/ folder.");
@@ -102,7 +107,10 @@ export default function FermentationTracker() {
       if (typeof brix !== 'number' || !Number.isFinite(brix)) return;
       setCurrentBrix(brix);
       const time = typeof v === 'number' ? null : v?.time;
-      setSugarCurrent(typeof time === 'number' && Number.isFinite(time) ? { brix, time } : null);
+      // `source` reaches buildPoints so a soft-sensor estimate is never fed
+      // back into its own curve fit.
+      const source = typeof v === 'number' || typeof v?.source !== 'string' ? null : v.source;
+      setSugarCurrent(typeof time === 'number' && Number.isFinite(time) ? { brix, time, source } : null);
     });
     const unsubSugarHist = onValue(ref(db, 'sensors/sugar/history'), (snap) => {
       setSugarHistory(snap.exists() ? snap.val() : null);
@@ -161,8 +169,8 @@ export default function FermentationTracker() {
       const nPh = normalize(currentPh, SCALING.ph.min, SCALING.ph.max);
       const nTarget = normalize(targetBrixNum, SCALING.brix.min, SCALING.brix.max);
 
-      const input = tf.tensor2d([[nBrix, nTemp, nPh, nTarget]]);
-      const prediction = model.predict(input) as tf.Tensor;
+      const input = tensor2d([[nBrix, nTemp, nPh, nTarget]]);
+      const prediction = model.predict(input) as Tensor;
       const data = prediction.dataSync();
       
       daysRemaining = Math.max(0, Math.ceil(data[0]));
@@ -235,22 +243,22 @@ export default function FermentationTracker() {
   };
 
   return (
-    <div className="p-4 space-y-4 pb-20">
+    <div className="p-4 space-y-4 pb-20 max-w-xl mx-auto">
       <div className="flex justify-between items-center">
-        <h1 className="font-bold text-xl text-gray-900">Batch Tracker</h1>
+        <h1 className="font-bold text-xl text-foreground">Batch Tracker</h1>
         {details ? (
-           <Button onClick={completeBatch} disabled={isCompleting} className="bg-green-600 hover:bg-green-700">
+           <Button onClick={completeBatch} disabled={isCompleting} className="bg-emerald-600 hover:bg-emerald-700 rounded-full">
              <ArchiveIcon className="w-4 h-4 mr-2" /> {isCompleting ? "Completing…" : "Complete Batch"}
            </Button>
         ) : (
-           <Button onClick={() => setIsModalOpen(true)} className="bg-[#8B1538]">New Batch</Button>
+           <Button onClick={() => setIsModalOpen(true)}>New Batch</Button>
         )}
       </div>
 
       {details ? (
         <>
           {/* Active Batch View */}
-          <Card className="bg-gradient-to-br from-[#8B1538] to-[#6B1028] text-white p-6 rounded-2xl shadow-lg">
+          <Card className="bg-primary text-primary-foreground p-6 rounded-2xl">
             <div className="flex justify-between items-start">
               <div>
                 <p className="text-xs opacity-80 uppercase">Current Batch</p>
@@ -258,43 +266,43 @@ export default function FermentationTracker() {
                 <p className="text-xs opacity-80 mt-1">Started: {details.startDate || "Unknown"}</p>
               </div>
               <div className="text-right">
-                <p className="text-2xl font-black">{details.overallProgress || 0}%</p>
+                <p className="text-2xl font-extrabold tnum">{details.overallProgress || 0}%</p>
               </div>
             </div>
-            <Progress value={details.overallProgress || 0} className="h-2 mt-4 bg-white/20" />
+            <Progress value={details.overallProgress || 0} className="h-2 mt-4 bg-primary-foreground/20 [&_[data-slot=progress-indicator]]:bg-primary-foreground" />
           </Card>
 
           <div className="grid grid-cols-2 gap-4">
-            <Card className="p-4 border-none bg-slate-50">
-              <CalendarIcon className="w-5 h-5 text-[#8B1538] mb-2" />
-              <p className="text-xs text-gray-500">Est. Harvest</p>
-              <p className="font-bold text-gray-900">{estDate}</p>
+            <Card className="p-4">
+              <CalendarIcon className="w-5 h-5 text-primary mb-2" />
+              <p className="text-xs text-muted-foreground">Est. Harvest</p>
+              <p className="font-bold text-foreground">{estDate}</p>
             </Card>
-            <Card className="p-4 border-none bg-slate-50">
-              <ClockIcon className="w-5 h-5 text-green-600 mb-2" />
-              <p className="text-xs text-gray-500">Remaining</p>
-              <p className="font-bold text-gray-900">{timeRemaining}</p>
+            <Card className="p-4">
+              <ClockIcon className="w-5 h-5 text-emerald-600 mb-2" />
+              <p className="text-xs text-muted-foreground">Remaining</p>
+              <p className="font-bold text-foreground">{timeRemaining}</p>
             </Card>
           </div>
 
-          <div className={`p-3 rounded-xl border flex items-center gap-3 text-xs ${model ? 'bg-purple-50 border-purple-100 text-purple-700' : 'bg-gray-50 border-gray-100 text-gray-500'}`}>
+          <div className={`p-3 rounded-xl border flex items-center gap-3 text-xs ${model ? 'bg-secondary border-border text-secondary-foreground' : 'bg-muted border-border text-muted-foreground'}`}>
             <BrainCircuitIcon className={`w-5 h-5 ${model ? 'animate-pulse' : ''}`} />
             <p>{daysSource === 'curve' ? "Soft sensor active: estimating from your sugar test logs." : model ? "Model estimate (Brix, temp, pH + target)" : modelError ? "Offline estimate (simple rate)" : "Loading model…"}</p>
           </div>
 
           <div className="space-y-4">
-            <h2 className="font-bold text-gray-900">Production Timeline</h2>
+            <h2 className="font-bold text-foreground">Production Timeline</h2>
             {stages.map((s) => (
               <div key={s.id} className="flex gap-4 items-start">
-                <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${s.status === 'completed' ? 'bg-green-500' : s.status === 'active' ? 'bg-[#8B1538]' : 'bg-gray-200'}`}>
+                <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${s.status === 'completed' ? 'bg-emerald-500' : s.status === 'active' ? 'bg-primary' : 'bg-muted'}`}>
                   {s.status === 'completed' ? <CheckCircle2Icon className="w-5 h-5 text-white" /> : <CircleIcon className="w-4 h-4 text-white/50" />}
                 </div>
                 <Card className="flex-1 p-3">
                   <div className="flex justify-between">
                     <p className="font-bold text-sm">{s.name}</p>
-                    <Badge variant="outline" className="text-[10px] uppercase">{s.status}</Badge>
+                    <Badge variant="outline" className="text-xs uppercase rounded-full">{s.status}</Badge>
                   </div>
-                  <p className="text-[10px] text-gray-400 mt-1">{s.date}</p>
+                  <p className="text-xs text-muted-foreground mt-1">{s.date}</p>
                 </Card>
               </div>
             ))}
@@ -302,58 +310,58 @@ export default function FermentationTracker() {
         </>
       ) : (
         /* Empty State */
-        <Card className="bg-gray-50 border-dashed py-12">
+        <Card className="bg-muted border-dashed py-12">
            <CardContent className="flex flex-col items-center justify-center text-center">
-              <FlaskConicalIcon className="w-12 h-12 text-gray-300 mb-4" />
-              <p className="text-gray-500 font-medium">No Active Fermentation</p>
-              <p className="text-sm text-gray-400 mt-1 mb-4">Initialize a new batch to start tracking.</p>
-              <Button onClick={() => setIsModalOpen(true)} className="bg-[#8B1538]">Initialize Batch</Button>
+              <FlaskConicalIcon className="w-12 h-12 text-muted-foreground mb-4" />
+              <p className="text-muted-foreground font-medium">No Active Fermentation</p>
+              <p className="text-sm text-muted-foreground mt-1 mb-4">Initialize a new batch to start tracking.</p>
+              <Button onClick={() => setIsModalOpen(true)}>Initialize Batch</Button>
            </CardContent>
         </Card>
       )}
 
       {/* ✅ HISTORICAL BATCH REPORTS */}
       {historicalBatches.length > 0 && (
-        <div className="pt-6 mt-6 border-t border-gray-200 space-y-4">
-          <h2 className="font-bold text-gray-900 flex items-center gap-2">
-            <FileTextIcon className="w-5 h-5 text-[#8B1538]" /> Production Reports
+        <div className="pt-6 mt-6 border-t border-border space-y-4">
+          <h2 className="font-bold text-foreground flex items-center gap-2">
+            <FileTextIcon className="w-5 h-5 text-primary" /> Production Reports
           </h2>
           
           <ScrollArea className="h-64">
             <div className="space-y-3 pb-4">
                {historicalBatches.map((batch) => (
-                 <Card key={batch.id} className="overflow-hidden">
-                   <div className="h-1 bg-[#8B1538]" />
-                   <CardHeader className="py-3 bg-gray-50">
-                     <div className="flex justify-between items-center">
-                       <CardTitle className="text-sm font-bold">{batch.batchId}</CardTitle>
-                       <span className="text-xs text-gray-500">
-                         {new Date(batch.completedAt).toLocaleDateString()}
-                       </span>
-                     </div>
-                   </CardHeader>
-                   <CardContent className="py-3">
-                     <div className="grid grid-cols-2 gap-y-2 text-sm">
-                       <div>
-                         <p className="text-gray-500 text-xs">Final Yield</p>
-                         <p className="font-medium text-green-700">{batch.finalYield}</p>
-                       </div>
-                       <div>
-                         <p className="text-gray-500 text-xs">Fruits Used</p>
-                         <p className="font-medium">{batch.fruitsUsed}</p>
-                       </div>
-                       <div>
-                         <p className="text-gray-500 text-xs">Avg Temp</p>
-                         <p className="font-medium">{batch.averageTemp}°C</p>
-                       </div>
-                       <div>
-                         <p className="text-gray-500 text-xs">Final Brix</p>
-                         <p className="font-medium">{batch.targetBrixAchieved}</p>
-                       </div>
-                     </div>
-                   </CardContent>
-                 </Card>
-               ))}
+                  <Card key={batch.id} className="overflow-hidden">
+                    <div className="h-1 bg-primary" />
+                    <CardHeader className="py-3 bg-muted">
+                      <div className="flex justify-between items-center">
+                        <CardTitle className="text-sm font-bold">{batch.batchId}</CardTitle>
+                        <span className="text-xs text-muted-foreground">
+                          {new Date(batch.completedAt).toLocaleDateString()}
+                        </span>
+                      </div>
+                    </CardHeader>
+                    <CardContent className="py-3">
+                      <div className="grid grid-cols-2 gap-y-2 text-sm">
+                        <div>
+                          <p className="text-muted-foreground text-xs">Final Yield</p>
+                          <p className="font-medium text-emerald-700">{batch.finalYield}</p>
+                        </div>
+                        <div>
+                          <p className="text-muted-foreground text-xs">Fruits Used</p>
+                          <p className="font-medium">{batch.fruitsUsed}</p>
+                        </div>
+                        <div>
+                          <p className="text-muted-foreground text-xs">Avg Temp</p>
+                          <p className="font-medium">{batch.averageTemp}°C</p>
+                        </div>
+                        <div>
+                          <p className="text-muted-foreground text-xs">Final Brix</p>
+                          <p className="font-medium">{batch.targetBrixAchieved}</p>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))}
             </div>
           </ScrollArea>
         </div>
@@ -362,10 +370,10 @@ export default function FermentationTracker() {
       {/* Initialize Modal */}
       {isModalOpen && (
         <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
-          <Card className="w-full max-w-sm p-6 bg-white rounded-3xl">
+          <Card className="w-full max-w-sm p-6 rounded-3xl">
             <div className="flex justify-between items-center mb-4">
                <h3 className="font-bold text-lg">Initialize New Batch</h3>
-               <button aria-label="Close dialog" onClick={() => setIsModalOpen(false)}><XIcon className="w-5 h-5 text-gray-500"/></button>
+               <button aria-label="Close dialog" onClick={() => setIsModalOpen(false)}><XIcon className="w-5 h-5 text-muted-foreground"/></button>
             </div>
             <form onSubmit={startBatch} className="space-y-4">
               <Input required type="number" placeholder="Must Volume (Liters)" onChange={e => setNewBatch({...newBatch, volume: e.target.value})} />
@@ -373,7 +381,7 @@ export default function FermentationTracker() {
               <Input required type="number" step="0.1" min="0" max="40" placeholder="Starting Brix (OG) e.g. 30" value={newBatch.initialBrix} onChange={e => setNewBatch({...newBatch, initialBrix: e.target.value})} />
               <Input required type="number" step="0.1" placeholder="Target Brix" value={newBatch.targetBrix} onChange={e => setNewBatch({...newBatch, targetBrix: e.target.value})} />
               <OgCalculator onApply={(og) => setNewBatch((b) => ({ ...b, initialBrix: String(og) }))} />
-              <Button type="submit" className="w-full bg-[#8B1538] py-6">Start Production</Button>
+              <Button type="submit" className="w-full py-6">Start Production</Button>
             </form>
           </Card>
         </div>

@@ -3,7 +3,7 @@ import { FlaskConicalIcon } from "lucide-react";
 import { getBrixToAbvFactor } from "../../lib/abvModel";
 
 interface AbvHeroProps {
-  estimatedAbv: { value: number; basis: "measured" | "estimated" } | null;
+  estimatedAbv: { value: number; basis: "measured" | "soft" | "estimated" } | null;
   ogBrixForCheck: number | null;
   brixAboveOg: boolean;
   updatedAt: number | null;
@@ -59,7 +59,7 @@ export function AbvHero({
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-amber-200/90">Alcohol Content</p>
-          <p className="font-bold tracking-tight mt-2 text-[2.75rem] leading-none">
+          <p className="font-extrabold tracking-tight mt-2 text-[2.75rem] leading-none tnum">
             {estimatedAbv !== null ? (
               <>{estimatedAbv.value.toFixed(1)}<span className="font-medium text-white/60 text-lg ml-1">% ABV</span></>
             ) : (
@@ -69,7 +69,9 @@ export function AbvHero({
           <p className="text-xs text-white/80 mt-2">
             {estimatedAbv?.basis === 'measured'
               ? `From sugar drop (OG ${ogBrixForCheck?.toFixed(1)} − current)${updatedAt ? ` · logged ${new Date(updatedAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}` : ""}`
-              : 'From current pH, temperature & pressure (experimental)'}
+              : estimatedAbv?.basis === 'soft'
+                ? `From sugar drop (soft-sensor estimate) · OG ${ogBrixForCheck?.toFixed(1)}`
+                : 'From current pH, temperature & pressure (experimental)'}
           </p>
           {brixAboveOg && (
             <p className="text-xs text-amber-200 bg-white/10 ring-1 ring-white/15 rounded-xl p-2 mt-2">

@@ -149,7 +149,7 @@ export default function NotificationCenter() {
           <div className="p-4 text-center">
              <Card className="border-red-200 bg-red-50">
                <CardContent className="p-4">
-                 <p className="text-sm text-red-700 font-medium">Realtime Database not available</p>
+                 <p className="text-sm text-destructive font-medium">Realtime Database not available</p>
                </CardContent>
              </Card>
           </div>
@@ -157,19 +157,19 @@ export default function NotificationCenter() {
   }
 
   return (
-    <div className="p-4 space-y-4 pb-20">
+    <div className="p-4 space-y-4 pb-20 max-w-xl mx-auto">
       {/* Header */}
       <div className="flex justify-between items-start">
         <div>
-          <h1 className="text-gray-900 font-bold text-xl">Notifications</h1>
-          <p className="text-sm text-gray-500">Stay updated with your system</p>
+          <h1 className="text-foreground font-bold text-xl">Notifications</h1>
+          <p className="text-sm text-muted-foreground">Stay updated with your system</p>
         </div>
         <div className="flex flex-col items-end gap-2">
           <div className="relative mt-1">
-            <BellIcon aria-hidden="true" className="w-6 h-6 text-[#8B1538]" />
+            <BellIcon aria-hidden="true" className="w-6 h-6 text-primary" />
             {unreadCount > 0 && (
-              <div className="absolute -top-1 -right-1 w-5 h-5 bg-red-600 rounded-full flex items-center justify-center shadow-sm">
-                <span className="text-xs text-white font-medium">{unreadCount}</span>
+              <div className="absolute -top-1 -right-1 w-5 h-5 bg-destructive rounded-full flex items-center justify-center shadow-sm">
+                <span className="text-xs text-white font-medium tnum">{unreadCount}</span>
               </div>
             )}
           </div>
@@ -177,7 +177,7 @@ export default function NotificationCenter() {
           {filteredNotifications.length > 0 && (
             <button 
               onClick={handleClearAll}
-              className="min-h-[44px] min-w-[44px] px-2 py-1 text-xs font-medium text-red-600 bg-red-50 hover:bg-red-100 rounded transition-colors flex items-center gap-1"
+              className="min-h-[44px] min-w-[44px] px-2 py-1 text-xs font-medium text-destructive bg-red-50 hover:bg-red-100 rounded-full transition-colors flex items-center gap-1"
             >
               <Trash2Icon aria-hidden="true" className="w-3 h-3" /> Clear All
             </button>
@@ -190,7 +190,7 @@ export default function NotificationCenter() {
         <Badge
           asChild
           variant={activeFilter === 'all' ? 'default' : 'outline'}
-          className={`whitespace-nowrap cursor-pointer transition-colors ${activeFilter === 'all' ? 'bg-[#8B1538] hover:bg-[#6b102b]' : 'hover:bg-gray-100'}`}
+          className={`whitespace-nowrap cursor-pointer transition-colors rounded-full ${activeFilter === 'all' ? '' : 'hover:bg-accent'}`}
         >
           <button type="button" aria-pressed={activeFilter === 'all'} onClick={() => setActiveFilter('all')}>
             All ({notifications.length})
@@ -199,7 +199,7 @@ export default function NotificationCenter() {
         <Badge
           asChild
           variant={activeFilter === 'warning' ? 'default' : 'outline'}
-          className={`whitespace-nowrap cursor-pointer transition-colors ${activeFilter === 'warning' ? 'bg-[#8B1538] hover:bg-[#6b102b]' : 'hover:bg-gray-100'}`}
+          className={`whitespace-nowrap cursor-pointer transition-colors rounded-full ${activeFilter === 'warning' ? '' : 'hover:bg-accent'}`}
         >
           <button type="button" aria-pressed={activeFilter === 'warning'} onClick={() => setActiveFilter('warning')}>
             Warnings ({notifications.filter(n => n.type === 'warning').length})
@@ -208,7 +208,7 @@ export default function NotificationCenter() {
         <Badge
           asChild
           variant={activeFilter === 'success' ? 'default' : 'outline'}
-          className={`whitespace-nowrap cursor-pointer transition-colors ${activeFilter === 'success' ? 'bg-[#8B1538] hover:bg-[#6b102b]' : 'hover:bg-gray-100'}`}
+          className={`whitespace-nowrap cursor-pointer transition-colors rounded-full ${activeFilter === 'success' ? '' : 'hover:bg-accent'}`}
         >
           <button type="button" aria-pressed={activeFilter === 'success'} onClick={() => setActiveFilter('success')}>
             Success ({notifications.filter(n => n.type === 'success').length})
@@ -220,8 +220,8 @@ export default function NotificationCenter() {
       <ScrollArea className="h-[calc(100vh-200px)] overflow-hidden">
         <div className="space-y-3 pb-4 overflow-hidden">
           {filteredNotifications.length === 0 ? (
-            <div className="text-center text-gray-500 py-10 flex flex-col items-center">
-              <BellIcon className="w-10 h-10 text-gray-300 mb-3" />
+            <div className="text-center text-muted-foreground py-10 flex flex-col items-center">
+              <BellIcon className="w-10 h-10 text-muted-foreground mb-3" />
               <p>No new notifications.</p>
             </div>
           ) : (
@@ -230,9 +230,9 @@ export default function NotificationCenter() {
                 const Icon = iconMap[notification.iconName] || InfoIcon;
                 
                 const typeColors = {
-                  warning: 'bg-amber-100 text-amber-600 border-amber-200',
-                  success: 'bg-green-100 text-green-600 border-green-200',
-                  info: 'bg-blue-100 text-blue-600 border-blue-200',
+                  warning: 'bg-amber-50 text-amber-700 border-amber-200',
+                  success: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+                  info: 'bg-blue-50 text-blue-700 border-blue-200',
                 };
 
                 return (
@@ -263,13 +263,13 @@ export default function NotificationCenter() {
                           handleDelete(notification.id);
                         }
                       }}
-                      className="relative bg-white"
+                      className="relative bg-card rounded-2xl"
                       whileTap={{ cursor: "grabbing" }}
                     >
                       <Card
                         onClick={() => handleMarkAsRead(notification.id)}
                         className={`
-                          ${notification.unread ? 'border-[#8B1538] border-l-4 cursor-pointer shadow-sm' : 'opacity-70'} 
+                          ${notification.unread ? 'border-primary border-l-4 cursor-pointer shadow-sm' : 'opacity-70'} 
                           transition-all hover:shadow-md
                         `}
                       >
@@ -281,16 +281,16 @@ export default function NotificationCenter() {
 
                             <div className="flex-1 min-w-0">
                               <div className="flex items-start justify-between gap-2">
-                                <p className={`text-gray-900 ${notification.unread ? 'font-semibold' : ''}`}>
+                                <p className={`text-foreground ${notification.unread ? 'font-semibold' : ''}`}>
                                   {notification.title}
                                 </p>
                                 {notification.unread && (
-                                  <div className="w-2 h-2 bg-[#8B1538] rounded-full flex-shrink-0 mt-1.5" />
+                                  <div className="w-2 h-2 bg-primary rounded-full flex-shrink-0 mt-1.5" />
                                 )}
                               </div>
-                              <p className="text-sm text-gray-600 mt-1">{notification.message}</p>
+                              <p className="text-sm text-muted-foreground mt-1">{notification.message}</p>
                               <div className="flex items-center justify-between gap-2 mt-2">
-                                <p className="text-xs text-gray-400">{formatTimeAgo(notification.timestamp)}</p>
+                                <p className="text-xs text-muted-foreground">{formatTimeAgo(notification.timestamp)}</p>
                                 {/* Visible delete: swipe is an enhancement, keyboard/SR users need a real control. */}
                                 <button
                                   type="button"
@@ -299,7 +299,7 @@ export default function NotificationCenter() {
                                     e.stopPropagation();
                                     handleDelete(notification.id);
                                   }}
-                                  className="inline-flex items-center justify-center min-h-[44px] min-w-[44px] rounded-full text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors"
+                                  className="inline-flex items-center justify-center min-h-[44px] min-w-[44px] rounded-full text-muted-foreground hover:text-destructive hover:bg-red-50 transition-colors"
                                 >
                                   <Trash2Icon aria-hidden="true" className="w-4 h-4" />
                                 </button>

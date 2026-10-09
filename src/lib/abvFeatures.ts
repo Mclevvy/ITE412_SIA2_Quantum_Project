@@ -215,6 +215,7 @@ export function getBrixToAbvFactor(): number {
 export function predictAbvFromBrixDrop(
   ogBrix: number | null | undefined,
   currentBrix: number | null | undefined,
+  instrument: string = "hydrometer",
   factor: number = getBrixToAbvFactor()
 ): number | null {
   if (typeof ogBrix !== "number" || !Number.isFinite(ogBrix) || ogBrix <= 0 || ogBrix > 60) return null;
@@ -228,7 +229,10 @@ export function predictAbvFromBrixDrop(
   // bogus 0%. The 0.5 tolerance absorbs normal hydrometer noise (Day-0 must
   // legitimately reads drop ≈ 0, which correctly yields 0%).
   if (drop < -0.5) return null;
-  const correction = asFiniteNumber(params.refractometer_correction) ?? 1;
+  const correction =
+      instrument === "refractometer"
+        ? (asFiniteNumber(params.refractometer_correction) ?? 1)
+        : 1;
   const abv = drop * factor * correction;
   return Math.min(25, Math.max(0, abv));
 }

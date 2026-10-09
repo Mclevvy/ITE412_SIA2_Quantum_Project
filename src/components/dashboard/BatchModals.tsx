@@ -67,21 +67,21 @@ export function BatchModals({
     <>
       {/* START BATCH MODAL */}
       {isStartModalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
           <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="w-full max-w-sm">
-            <Card className="p-6 bg-white rounded-3xl shadow-xl">
+            <Card className="p-6 rounded-3xl shadow-xl">
               <div className="flex justify-between items-center mb-4">
                  <h3 className="font-bold text-lg">Initialize New Batch</h3>
-                 <button aria-label="Close dialog" onClick={() => setIsStartModalOpen(false)}><XIcon className="w-5 h-5 text-gray-500 hover:text-gray-900 transition-colors"/></button>
+                 <button aria-label="Close dialog" onClick={() => setIsStartModalOpen(false)}><XIcon className="w-5 h-5 text-muted-foreground hover:text-foreground transition-colors"/></button>
               </div>
               <form onSubmit={onStartBatch} className="space-y-4">
                 <Input required type="number" placeholder="Must Volume (Liters)" value={newBatch.volume} onChange={e => setNewBatch({...newBatch, volume: e.target.value})} />
                 <Input required type="number" placeholder="Fruit Weight (kg)" value={newBatch.fruits} onChange={e => setNewBatch({...newBatch, fruits: e.target.value})} />
                 <Input required type="number" step="0.1" min="0" max="40" placeholder="Starting Brix (OG) e.g. 30" value={newBatch.initialBrix} onChange={e => setNewBatch({...newBatch, initialBrix: e.target.value})} />
                 <Input required type="number" step="0.1" placeholder="Target Brix" value={newBatch.targetBrix} onChange={e => setNewBatch({...newBatch, targetBrix: e.target.value})} />
-                <p className="text-xs text-gray-500 -mt-2">Starting Brix is measured before fermentation (refractometer is fine on Day 0). It drives the live Alcohol % calculation.</p>
+                <p className="text-xs text-muted-foreground -mt-2">Starting Brix is measured before fermentation (refractometer is fine on Day 0). It drives the live Alcohol % calculation.</p>
                 <OgCalculator onApply={(og) => setNewBatch((b) => ({ ...b, initialBrix: String(og) }))} />
-                <Button type="submit" className="w-full bg-[#8B1538] hover:bg-[#6b102b] py-6 text-white border-none transition-colors">Start Production</Button>
+                <Button type="submit" className="w-full py-6 transition-colors">Start Production</Button>
               </form>
             </Card>
           </motion.div>
@@ -90,27 +90,27 @@ export function BatchModals({
 
       {/* WARNING MODAL FOR ENDING BATCH */}
       {isStopModalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
           <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="w-full max-w-sm">
-            <Card className="p-6 bg-white rounded-3xl border-red-200 shadow-xl">
+            <Card className="p-6 rounded-3xl border-red-200 shadow-xl">
               <div className="flex flex-col items-center text-center space-y-4">
                 <div className="w-14 h-14 bg-red-100 rounded-2xl flex items-center justify-center text-red-600">
                   <AlertTriangleIcon className="w-7 h-7" />
                 </div>
                 <div>
-                  <h3 className="font-bold text-lg text-gray-900">End Current Batch?</h3>
-                  <p className="text-sm text-gray-500 mt-2">
-                    Are you sure you want to stop monitoring <strong className="text-gray-900">{activeBatchId}</strong>? This will archive the data and clear the live graphs.
+                  <h3 className="font-bold text-lg text-foreground">End Current Batch?</h3>
+                  <p className="text-sm text-muted-foreground mt-2">
+                    Are you sure you want to stop monitoring <strong className="text-foreground">{activeBatchId}</strong>? This will archive the data and clear the live graphs.
                   </p>
                 </div>
                 <div className="flex gap-3 w-full mt-4">
-                  <Button onClick={() => setIsStopModalOpen(false)} disabled={isEndingBatch} variant="outline" className="flex-1 text-gray-700 border-gray-300 bg-white">
+                  <Button onClick={() => setIsStopModalOpen(false)} disabled={isEndingBatch} variant="outline" className="flex-1">
                     Cancel
                   </Button>
                   <Button
                     onClick={onStopBatch}
                     disabled={isEndingBatch}
-                    className="flex-1 bg-[#8B1538] hover:bg-[#6b102b] text-white border-none shadow-md"
+                    className="flex-1 shadow-md"
                   >
                     {isEndingBatch ? "Ending…" : "Confirm End"}
                   </Button>
@@ -123,14 +123,14 @@ export function BatchModals({
 
       {/* LOG HYDROMETER CHECK MODAL — additive only, safe on a live batch */}
       {isHydroModalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
           <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="w-full max-w-sm">
-            <Card className="p-6 bg-white rounded-3xl shadow-xl">
+            <Card className="p-6 rounded-3xl shadow-xl">
               <div className="flex justify-between items-center mb-4">
                 <h3 className="font-bold text-lg">Log Hydrometer Check</h3>
-                <button aria-label="Close dialog" onClick={() => setIsHydroModalOpen(false)}><XIcon className="w-5 h-5 text-gray-500 hover:text-gray-900 transition-colors"/></button>
+                <button aria-label="Close dialog" onClick={() => setIsHydroModalOpen(false)}><XIcon className="w-5 h-5 text-muted-foreground hover:text-foreground transition-colors"/></button>
               </div>
-              <p className="text-sm text-gray-500 mb-4">
+              <p className="text-sm text-muted-foreground mb-4">
                 Enter the ABV from your hydrometer math (e.g. (OG−FG) × 131.25). It is stored next to the app's current estimate — nothing is archived or cleared.
               </p>
               <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-2 -mt-1">
@@ -145,17 +145,17 @@ export function BatchModals({
                       key={t}
                       type="button"
                       onClick={() => setHydroCheckType(t)}
-                      className={`flex-1 py-2 px-3 rounded-lg border text-sm font-medium capitalize transition-colors ${
+                      className={`flex-1 py-2 px-3 rounded-full border text-sm font-medium capitalize transition-colors ${
                         hydroCheckType === t
-                          ? 'bg-[#8B1538] text-white border-[#8B1538]'
-                          : 'bg-white text-gray-600 border-gray-300 hover:border-gray-400'
+                          ? 'bg-primary text-primary-foreground border-primary'
+                          : 'bg-card text-muted-foreground border-border hover:border-primary/40'
                       }`}
                     >
                       {t === 'actual' ? 'Actual (now)' : 'Potential (dry)'}
                     </button>
                   ))}
                 </div>
-                <p className="text-xs text-gray-500 -mt-2">
+                <p className="text-xs text-muted-foreground -mt-2">
                   {hydroCheckType === 'actual'
                     ? 'Use (OG−FG) × 131.25 from today\'s hydrometer pair — it should match the app.'
                     : 'Use the OG potential — expect a big Δ mid-batch that converges toward ~0 at dryness.'}
@@ -171,7 +171,7 @@ export function BatchModals({
                   value={hydroAbvInput}
                   onChange={e => setHydroAbvInput(e.target.value)}
                 />
-                <Button type="submit" className="w-full bg-[#8B1538] hover:bg-[#6b102b] py-6 text-white border-none transition-colors">
+                <Button type="submit" className="w-full py-6 transition-colors">
                   Save Check
                 </Button>
               </form>
@@ -181,14 +181,14 @@ export function BatchModals({
       )}
 
       {/* LOG SUGAR TEST MODAL */}      {isSugarModalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
           <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="w-full max-w-sm">
-            <Card className="p-6 bg-white rounded-3xl shadow-xl">
+            <Card className="p-6 rounded-3xl shadow-xl">
               <div className="flex justify-between items-center mb-4">
                 <h3 className="font-bold text-lg">Log Sugar Test Result</h3>
-                <button aria-label="Close dialog" onClick={() => setIsSugarModalOpen(false)}><XIcon className="w-5 h-5 text-gray-500 hover:text-gray-900 transition-colors"/></button>
+                <button aria-label="Close dialog" onClick={() => setIsSugarModalOpen(false)}><XIcon className="w-5 h-5 text-muted-foreground hover:text-foreground transition-colors"/></button>
               </div>
-              <p className="text-sm text-gray-500 mb-4">
+              <p className="text-sm text-muted-foreground mb-4">
                 Enter the Brix reading from your hydrometer/refractometer test. Measure again in {SUGAR_TEST_INTERVAL_DAYS} days.
               </p>
               <form onSubmit={onLogSugarTest} className="space-y-4">
@@ -209,10 +209,10 @@ export function BatchModals({
                       key={inst}
                       type="button"
                       onClick={() => setSugarInstrument(inst)}
-                      className={`flex-1 py-2 px-3 rounded-lg border text-sm font-medium capitalize transition-colors ${
+                      className={`flex-1 py-2 px-3 rounded-full border text-sm font-medium capitalize transition-colors ${
                         sugarInstrument === inst
-                          ? 'bg-[#6B2C5D] text-white border-[#6B2C5D]'
-                          : 'bg-white text-gray-600 border-gray-300 hover:border-gray-400'
+                          ? 'bg-primary text-primary-foreground border-primary'
+                          : 'bg-card text-muted-foreground border-border hover:border-primary/40'
                       }`}
                     >
                       {inst}
@@ -224,7 +224,7 @@ export function BatchModals({
                     Refractometers read high once alcohol is present. Prefer a hydrometer for in-progress readings.
                   </p>
                 )}
-                <Button type="submit" className="w-full bg-[#6B2C5D] hover:bg-[#4B1C3D] py-6 text-white border-none transition-colors">
+                <Button type="submit" className="w-full py-6 transition-colors">
                   Save Reading
                 </Button>
               </form>

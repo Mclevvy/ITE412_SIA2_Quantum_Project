@@ -41,8 +41,8 @@ export default function Dashboard({ userRole }: DashboardProps) {
       <div className="flex items-center gap-3 mb-2 pt-1">
         <Logo size="xl" />
         <div>
-          <p className="text-[11px] font-semibold uppercase tracking-[0.25em] text-[#8B1538]/70">Bunius-Sense</p>
-          <h1 className="text-3xl font-bold text-gray-900 tracking-tight">Dashboard</h1>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.25em] text-primary/70">Bunius-Sense</p>
+          <h1 className="text-3xl font-bold text-foreground tracking-tight">Dashboard</h1>
         </div>
       </div>
 
@@ -78,6 +78,7 @@ export default function Dashboard({ userRole }: DashboardProps) {
         tempNow={live.tempNow}
         pressureNow={live.pressureNow}
         brixNow={live.brixNow}
+        brixSource={live.brixSource}
         phNow={live.phNow}
         tempStatus={live.tempStatus}
         brixStatus={live.brixStatus}

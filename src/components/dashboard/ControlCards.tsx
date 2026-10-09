@@ -42,10 +42,10 @@ export function ControlCards({
   return (
     <>
       {/* BATCH CONTROL CARD */}
-      <Card className={`${isBatchActive ? 'bg-gradient-to-r from-emerald-50 via-white to-white border-emerald-200' : 'bg-white border-dashed border-gray-300'} rounded-3xl shadow-sm`}>
+      <Card className={`${isBatchActive ? 'border-emerald-200' : 'border-dashed'} rounded-2xl`}>
         <CardContent className="p-4 flex justify-between items-center">
            <div>
-             <p className="text-sm font-bold text-gray-900 flex items-center gap-2">
+              <p className="text-sm font-bold text-foreground flex items-center gap-2">
                {isBatchActive && (
                  <span className="relative flex h-2.5 w-2.5">
                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
@@ -54,20 +54,21 @@ export function ControlCards({
                )}
                Batch Control
              </p>
-             <p className="text-xs text-gray-600 mt-1">
+              <p className="text-xs text-muted-foreground mt-1">
                {isBatchActive ? `Currently monitoring ${activeBatchId}` : 'No active batch. Graphs will not record history.'}
              </p>
            </div>
             {isBatchActive ? (
-               <Button
-                 onClick={onOpenStop}
-                 size="sm"
-                 className="gap-1 bg-red-500 hover:bg-red-600 text-white shadow-sm border-none rounded-full"
-               >
+                <Button
+                  onClick={onOpenStop}
+                  size="sm"
+                  variant="destructive"
+                  className="gap-1 rounded-full"
+                >
                  <StopCircleIcon className="w-4 h-4" /> End Batch
                </Button>
             ) : (
-               <Button onClick={onOpenStart} size="sm" className="gap-1 bg-[#8B1538] text-white hover:bg-[#6b102b] border-none shadow-md shadow-[#8B1538]/25 rounded-full">
+                <Button onClick={onOpenStart} size="sm" className="gap-1 rounded-full shadow-md shadow-primary/25">
                  <PlayCircleIcon className="w-4 h-4" /> Start New Batch
                </Button>
             )}
@@ -76,12 +77,12 @@ export function ControlCards({
 
       {/* STARTING BRIX (OG) CORRECTION — only while a batch is active */}
       {isBatchActive && (
-        <Card className={`${ogBrixForCheck !== null && !brixAboveOg ? 'bg-white border-black/5' : 'bg-amber-50 border-amber-200'} rounded-3xl shadow-sm`}>
+        <Card className={`${ogBrixForCheck !== null && !brixAboveOg ? '' : 'bg-amber-50 border-amber-200'} rounded-2xl`}>
           <CardContent className="p-4">
             <div className="flex justify-between items-center">
               <div>
-                <p className="text-sm font-bold text-gray-900">Starting Brix (OG)</p>
-                <p className="text-xs text-gray-600 mt-1">
+                <p className="text-sm font-bold text-foreground dark:text-amber-950">Starting Brix (OG)</p>
+                <p className="text-xs text-muted-foreground dark:text-amber-800 mt-1">
                   {ogBrixForCheck !== null
                     ? `Recorded OG: ${ogBrixForCheck.toFixed(1)} Brix`
                     : 'No OG recorded — Alcohol % is estimated, not measured.'}
@@ -91,7 +92,6 @@ export function ControlCards({
                 <Button
                   size="sm"
                   variant="outline"
-                  className="bg-white"
                   onClick={() => {
                     setOgInput(ogBrixForCheck !== null ? String(ogBrixForCheck) : '');
                     setIsOgEditing(true);
@@ -113,12 +113,12 @@ export function ControlCards({
                   placeholder="Day-0 must Brix, e.g. 30"
                   value={ogInput}
                   onChange={e => setOgInput(e.target.value)}
-                  className="bg-white"
+                  className="bg-input-background"
                 />
-                <Button type="submit" size="sm" className="bg-[#8B1538] hover:bg-[#6b102b] text-white border-none shrink-0">
+                <Button type="submit" size="sm" className="shrink-0">
                   Save
                 </Button>
-                <Button type="button" size="sm" variant="outline" className="bg-white shrink-0" onClick={() => setIsOgEditing(false)}>
+                <Button type="button" size="sm" variant="outline" className="shrink-0" onClick={() => setIsOgEditing(false)}>
                   Cancel
                 </Button>
               </form>
@@ -129,7 +129,7 @@ export function ControlCards({
               </div>
             )}
             {isOgEditing && (
-              <p className="text-xs text-gray-500 mt-2">
+              <p className="text-xs text-muted-foreground mt-2">
                 OG is the must reading on Day 0, before fermentation — not the finish target. Refractometer is fine for this one reading.
               </p>
             )}
@@ -139,24 +139,24 @@ export function ControlCards({
 
       {/* Status Cards */}
       <div className="grid grid-cols-2 gap-3">
-        <Card className={`bg-gradient-to-br ${isBatchActive ? 'from-[#8B1538] via-[#6B1028] to-[#3d0a18]' : 'from-gray-400 to-gray-600'} text-white rounded-3xl border-0 shadow-lg shadow-[#8B1538]/20 ring-1 ring-white/10`}>
+        <Card className={`${isBatchActive ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'} rounded-2xl border-0`}>
           <CardContent className="p-4">
             <div className="flex items-start justify-between">
               <div>
                  <p className="text-[11px] uppercase tracking-[0.18em] opacity-90 mb-1">Wine Status</p>
-                <p className="text-white font-bold text-xl">{isBatchActive ? 'Active' : 'Idle'}</p>
+                <p className="font-bold text-xl">{isBatchActive ? 'Active' : 'Idle'}</p>
               </div>
               <FlaskConicalIcon className="w-8 h-8 opacity-60" />
             </div>
           </CardContent>
         </Card>
 
-        <Card className={`bg-gradient-to-br ${isBatchActive ? 'from-[#2f5b1e] via-[#2D5016] to-[#16280c]' : 'from-gray-400 to-gray-600'} text-white rounded-3xl border-0 shadow-lg shadow-emerald-900/20 ring-1 ring-white/10`}>
+        <Card className={`${isBatchActive ? 'bg-emerald-600 text-white' : 'bg-muted text-muted-foreground'} rounded-2xl border-0`}>
           <CardContent className="p-4">
             <div className="flex items-start justify-between">
               <div>
                  <p className="text-[11px] uppercase tracking-[0.18em] opacity-90 mb-1">System Stability</p>
-                <p className="text-white font-bold text-xl">{isBatchActive ? 'Monitoring' : 'Standby'}</p>
+                <p className="font-bold text-xl">{isBatchActive ? 'Monitoring' : 'Standby'}</p>
               </div>
               <TrendingUpIcon className="w-8 h-8 opacity-60" />
             </div>

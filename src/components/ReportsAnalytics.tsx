@@ -41,6 +41,8 @@ import * as XLSX from "xlsx";
 import { db } from "../lib/firebase";
 import { ref, set } from "firebase/database";
 import { useHistoryList } from "../hooks/useHistoryList";
+import { escapeHtml as esc, guardFormula as guard } from "../lib/exportGuards";
+import BatchRecordSheet from "./BatchRecordSheet";
 
 type TabType = "weekly" | "monthly" | "seasonal";
 type ExportType = "pdf" | "excel" | "print";
@@ -48,6 +50,8 @@ type ExportType = "pdf" | "excel" | "print";
 export default function ReportsAnalytics() {
   const [activeTab, setActiveTab] = useState<TabType>("weekly");
   const [showExportMenu, setShowExportMenu] = useState(false);
+  // Batch whose full sensor record is open in the detail sheet (null = closed).
+  const [selectedReport, setSelectedReport] = useState<any>(null);
   // 1. FETCH ACTUAL FIREBASE HISTORY (shared hook: same path, mapping,
   // oldest-first sort, loading + clear-on-delete semantics preserved).
   // Malformed records (legacy/test/partial writes with no batchId) are
@@ -144,9 +148,9 @@ export default function ReportsAnalytics() {
     });
 
     return [
-      { name: "Premium (15-18 Brix)", value: premium, color: "#2D5016" },
-      { name: "Standard (13-14 Brix)", value: standard, color: "#8B1538" },
-      { name: "Below Standard", value: below, color: "#6B2C5D" },
+      { name: "Premium (15-18 Brix)", value: premium, color: "var(--chart-4)" },
+      { name: "Standard (13-14 Brix)", value: standard, color: "var(--chart-1)" },
+      { name: "Below Standard", value: below, color: "var(--chart-2)" },
     ];
   }, [historicalData]);
 
@@ -254,10 +258,6 @@ export default function ReportsAnalytics() {
     const report = getReportData();
     const workbook = XLSX.utils.book_new();
 
-    // Neutralize spreadsheet formula injection: batchId and other DB-sourced
-    // strings starting with = + - @ would execute as formulas in Excel.
-    const guard = (cell: unknown) =>
-      typeof cell === "string" && /^[=+\-@]/.test(cell) ? `'${cell}` : cell;
     const mainSheetData = [report.headers, ...report.rows.map((row) => row.map(guard))];
     const worksheet = XLSX.utils.aoa_to_sheet(mainSheetData);
 
@@ -267,13 +267,6 @@ export default function ReportsAnalytics() {
 
   const printReport = () => {
     const report = getReportData();
-
-    // Escape every interpolated value: batch fields come from the database
-    // and would otherwise execute as HTML in the print window (XSS).
-    const esc = (value: unknown) =>
-      String(value ?? "").replace(/[&<>"']/g, (c) =>
-        ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c] ?? c
-      );
 
     let html = `
       <html>
@@ -327,20 +320,20 @@ export default function ReportsAnalytics() {
 
   if (isLoading) {
     return (
-      <div className="flex flex-col items-center justify-center h-[60vh] text-gray-500">
-         <Loader2Icon className="w-10 h-10 animate-spin text-[#8B1538] mb-4" />
+      <div className="flex flex-col items-center justify-center h-[60vh] text-muted-foreground">
+         <Loader2Icon className="w-10 h-10 animate-spin text-primary mb-4" />
          <p>Loading historical data...</p>
       </div>
     );
   }
 
   return (
-    <div className="p-4 space-y-4 pb-20">
+    <div className="p-4 space-y-4 pb-20 max-w-xl mx-auto">
       {/* Header & Export */}
       <div className="flex justify-between items-start">
         <div>
-          <h1 className="text-gray-900 font-bold text-xl">Reports & Analytics</h1>
-          <p className="text-sm text-gray-500">Production insights from {historicalData.length} completed batches</p>
+          <h1 className="text-foreground font-bold text-xl">Reports & Analytics</h1>
+          <p className="text-sm text-muted-foreground">Production insights from {historicalData.length} completed batches</p>
         </div>
 
         <div className="flex gap-2">
@@ -359,7 +352,6 @@ export default function ReportsAnalytics() {
           <div className="relative">
             <Button
               size="sm"
-              className="bg-[#8B1538] hover:bg-[#6B1028] text-white"
               onClick={() => setShowExportMenu((prev) => !prev)}
               disabled={historicalData.length === 0}
             >
@@ -368,15 +360,15 @@ export default function ReportsAnalytics() {
             </Button>
 
             {showExportMenu && (
-              <div className="absolute right-0 mt-2 w-44 bg-white border rounded-lg shadow-lg z-20 overflow-hidden">
-                <button onClick={() => handleExport("pdf")} className="w-full px-4 py-3 text-left text-sm hover:bg-gray-50 flex items-center gap-2">
+              <div className="absolute right-0 mt-2 w-44 bg-card border border-border rounded-xl shadow-lg z-20 overflow-hidden">
+                <button onClick={() => handleExport("pdf")} className="w-full px-4 py-3 text-left text-sm hover:bg-accent flex items-center gap-2 min-h-[44px]">
                   <FileTextIcon className="w-4 h-4 text-red-600" /> Export PDF
                 </button>
-                <button onClick={() => handleExport("excel")} className="w-full px-4 py-3 text-left text-sm hover:bg-gray-50 flex items-center gap-2">
-                  <FileSpreadsheetIcon className="w-4 h-4 text-green-600" /> Export Excel
+                <button onClick={() => handleExport("excel")} className="w-full px-4 py-3 text-left text-sm hover:bg-accent flex items-center gap-2 min-h-[44px]">
+                  <FileSpreadsheetIcon className="w-4 h-4 text-emerald-600" /> Export Excel
                 </button>
-                <button onClick={() => handleExport("print")} className="w-full px-4 py-3 text-left text-sm hover:bg-gray-50 flex items-center gap-2">
-                  <PrinterIcon className="w-4 h-4 text-gray-600" /> Direct Print
+                <button onClick={() => handleExport("print")} className="w-full px-4 py-3 text-left text-sm hover:bg-accent flex items-center gap-2 min-h-[44px]">
+                  <PrinterIcon className="w-4 h-4 text-muted-foreground" /> Direct Print
                 </button>
               </div>
             )}
@@ -386,35 +378,35 @@ export default function ReportsAnalytics() {
 
       {/* ✅ UPDATED METRIC CARDS (Now 4 Columns to include Fruits Used) */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <Card className="bg-gradient-to-br from-[#2D5016] to-[#1D3010] text-white">
+        <Card>
           <CardContent className="p-3 text-center flex flex-col justify-center h-full">
-            <TrendingUpIcon className="w-5 h-5 mx-auto mb-1 opacity-80" />
-            <p className="text-white font-bold text-lg">{avgPh}</p>
-            <p className="text-[10px] opacity-90 mt-0.5 uppercase tracking-wider">Avg pH</p>
+            <TrendingUpIcon className="w-5 h-5 mx-auto mb-1 text-emerald-700" />
+            <p className="text-foreground font-bold text-lg tnum">{avgPh}</p>
+            <p className="text-xs text-muted-foreground mt-0.5 uppercase tracking-wider">Avg pH</p>
           </CardContent>
         </Card>
 
-        <Card className="bg-gradient-to-br from-[#8B1538] to-[#6B1028] text-white">
+        <Card>
           <CardContent className="p-3 text-center flex flex-col justify-center h-full">
-            <DropletIcon className="w-5 h-5 mx-auto mb-1 opacity-80" />
-            <p className="text-white font-bold text-lg">{totalYield}</p>
-            <p className="text-[10px] opacity-90 mt-0.5 uppercase tracking-wider">Total Yield</p>
+            <DropletIcon className="w-5 h-5 mx-auto mb-1 text-primary" />
+            <p className="text-foreground font-bold text-lg tnum">{totalYield}</p>
+            <p className="text-xs text-muted-foreground mt-0.5 uppercase tracking-wider">Total Yield</p>
           </CardContent>
         </Card>
 
-        <Card className="bg-gradient-to-br from-[#d97706] to-[#9a3412] text-white">
+        <Card>
           <CardContent className="p-3 text-center flex flex-col justify-center h-full">
-            <LeafIcon className="w-5 h-5 mx-auto mb-1 opacity-80" />
-            <p className="text-white font-bold text-lg">{totalFruits}</p>
-            <p className="text-[10px] opacity-90 mt-0.5 uppercase tracking-wider">Fruit Used</p>
+            <LeafIcon className="w-5 h-5 mx-auto mb-1 text-amber-700" />
+            <p className="text-foreground font-bold text-lg tnum">{totalFruits}</p>
+            <p className="text-xs text-muted-foreground mt-0.5 uppercase tracking-wider">Fruit Used</p>
           </CardContent>
         </Card>
 
-        <Card className="bg-gradient-to-br from-[#6B2C5D] to-[#4B1C3D] text-white">
+        <Card>
           <CardContent className="p-3 text-center flex flex-col justify-center h-full">
-            <ThermometerIcon className="w-5 h-5 mx-auto mb-1 opacity-80" />
-            <p className="text-white font-bold text-lg">{avgTemp}</p>
-            <p className="text-[10px] opacity-90 mt-0.5 uppercase tracking-wider">Avg Temp</p>
+            <ThermometerIcon className="w-5 h-5 mx-auto mb-1 text-secondary-foreground" />
+            <p className="text-foreground font-bold text-lg tnum">{avgTemp}</p>
+            <p className="text-xs text-muted-foreground mt-0.5 uppercase tracking-wider">Avg Temp</p>
           </CardContent>
         </Card>
       </div>
@@ -428,11 +420,11 @@ export default function ReportsAnalytics() {
         </TabsList>
 
         {historicalData.length === 0 ? (
-           <Card className="mt-4 py-12 border-dashed bg-gray-50">
+           <Card className="mt-4 py-12 border-dashed bg-muted">
               <CardContent className="flex flex-col items-center text-center">
-                <FileTextIcon className="w-12 h-12 text-gray-300 mb-3" />
-                <p className="text-gray-500 font-medium">No Historical Data</p>
-                <p className="text-xs text-gray-400 mt-1">Start and complete a batch to generate analytics.</p>
+                <FileTextIcon className="w-12 h-12 text-muted-foreground mb-3" />
+                <p className="text-muted-foreground font-medium">No Historical Data</p>
+                <p className="text-xs text-muted-foreground mt-1">Start and complete a batch to generate analytics.</p>
               </CardContent>
            </Card>
         ) : (
@@ -446,14 +438,14 @@ export default function ReportsAnalytics() {
                 <CardContent>
                   <ResponsiveContainer width="100%" height={250}>
                     <LineChart data={weeklyGraphData}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                      <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
                       <XAxis dataKey="batchId" tick={{ fontSize: 10 }} />
                       <YAxis yAxisId="left" tick={{ fontSize: 10 }} domain={['auto', 'auto']} />
                       <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 10 }} domain={['auto', 'auto']} />
-                      <Tooltip />
+                      <Tooltip contentStyle={{ backgroundColor: "var(--card)", border: "1px solid var(--border)", borderRadius: 12, fontSize: 12 }} />
                       <Legend />
-                      <Line yAxisId="left" type="monotone" dataKey="temperature" stroke="#f97316" strokeWidth={2} name="Temp (°C)" />
-                      <Line yAxisId="right" type="monotone" dataKey="sugar" stroke="#8B1538" strokeWidth={2} name="Final Brix" />
+                      <Line yAxisId="left" type="monotone" dataKey="temperature" stroke="var(--chart-3)" strokeWidth={2} dot={false} animationDuration={300} name="Temp (°C)" />
+                      <Line yAxisId="right" type="monotone" dataKey="sugar" stroke="var(--chart-1)" strokeWidth={2} dot={false} animationDuration={300} name="Final Brix" />
                     </LineChart>
                   </ResponsiveContainer>
                 </CardContent>
@@ -469,11 +461,11 @@ export default function ReportsAnalytics() {
                 <CardContent>
                   <ResponsiveContainer width="100%" height={250}>
                     <BarChart data={yieldGraphData}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                      <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
                       <XAxis dataKey="batchId" tick={{ fontSize: 10 }} />
                       <YAxis tick={{ fontSize: 10 }} />
-                      <Tooltip />
-                      <Bar dataKey="yield" fill="#8B1538" radius={[4, 4, 0, 0]} name="Yield (L)" />
+                      <Tooltip contentStyle={{ backgroundColor: "var(--card)", border: "1px solid var(--border)", borderRadius: 12, fontSize: 12 }} />
+                      <Bar dataKey="yield" fill="var(--chart-1)" radius={[4, 4, 0, 0]} name="Yield (L)" />
                     </BarChart>
                   </ResponsiveContainer>
                 </CardContent>
@@ -503,7 +495,7 @@ export default function ReportsAnalytics() {
                           <Cell key={`cell-${index}`} fill={entry.color} />
                         ))}
                       </Pie>
-                      <Tooltip />
+                      <Tooltip contentStyle={{ backgroundColor: "var(--card)", border: "1px solid var(--border)", borderRadius: 12, fontSize: 12 }} />
                     </PieChart>
                   </ResponsiveContainer>
                 </CardContent>
@@ -515,11 +507,11 @@ export default function ReportsAnalytics() {
 
       {/* BATCH REPORT LIST */}
       {historicalData.length > 0 && (
-        <div className="pt-6 mt-6 border-t border-gray-200 space-y-4">
-          <h2 className="font-bold text-gray-900 flex items-center gap-2">
-            <FileTextIcon className="w-5 h-5 text-[#8B1538]" /> Production Reports Log
+        <div className="pt-6 mt-6 border-t border-border space-y-4">
+          <h2 className="font-bold text-foreground flex items-center gap-2">
+            <FileTextIcon className="w-5 h-5 text-primary" /> Production Reports Log
           </h2>
-          <p className="text-xs text-gray-500 mb-2">
+          <p className="text-xs text-muted-foreground mb-2">
             Showing {filteredHistory.length} of {historicalData.length} completed batches.
             {hiddenInvalidCount > 0 && (
               <> · {hiddenInvalidCount} invalid record{hiddenInvalidCount === 1 ? "" : "s"} hidden</>
@@ -527,28 +519,28 @@ export default function ReportsAnalytics() {
           </p>
 
           {/* FILTER BAR */}
-          <div className="flex flex-col gap-4 sm:flex-row sm:flex-wrap sm:items-end bg-gray-50 border border-gray-100 rounded-2xl p-3">
+          <div className="flex flex-col gap-4 sm:flex-row sm:flex-wrap sm:items-end bg-muted border border-border rounded-2xl p-3">
             <div className="flex-1 min-w-[160px]">
-              <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1.5">
+              <label className="block text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1.5">
                 Search Batch ID
               </label>
               <div className="relative">
-                <SearchIcon className="w-3.5 h-3.5 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <SearchIcon className="w-3.5 h-3.5 text-muted-foreground absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
                 <Input
                   placeholder="e.g. Batch #1234"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  className="h-9 text-sm pl-9"
+                  className="text-sm pl-9"
                 />
               </div>
             </div>
 
             <div className="min-w-[150px]">
-              <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1.5">Quality</label>
+              <label className="block text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1.5">Quality</label>
               <select
                 value={qualityFilter}
                 onChange={(e) => setQualityFilter(e.target.value as QualityFilter)}
-                className="h-9 w-full rounded-md border border-gray-200 bg-white text-sm px-2 text-gray-700"
+                className="min-h-[44px] w-full rounded-xl border border-input bg-input-background text-sm px-2 text-foreground"
               >
                 <option value="all">All Grades</option>
                 <option value="premium">Premium (15-18 Brix)</option>
@@ -558,31 +550,31 @@ export default function ReportsAnalytics() {
             </div>
 
             <div className="min-w-[130px]">
-              <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1.5">From</label>
+              <label className="block text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1.5">From</label>
               <Input
                 type="date"
                 value={dateFrom}
                 onChange={(e) => setDateFrom(e.target.value)}
-                className="h-9 text-sm"
+                className="text-sm"
               />
             </div>
 
             <div className="min-w-[130px]">
-              <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1.5">To</label>
+              <label className="block text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1.5">To</label>
               <Input
                 type="date"
                 value={dateTo}
                 onChange={(e) => setDateTo(e.target.value)}
-                className="h-9 text-sm"
+                className="text-sm"
               />
             </div>
 
             <div className="min-w-[140px]">
-              <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1.5">Sort</label>
+              <label className="block text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1.5">Sort</label>
               <select
                 value={sortOrder}
                 onChange={(e) => setSortOrder(e.target.value as SortOrder)}
-                className="h-9 w-full rounded-md border border-gray-200 bg-white text-sm px-2 text-gray-700"
+                className="min-h-[44px] w-full rounded-xl border border-input bg-input-background text-sm px-2 text-foreground"
               >
                 <option value="newest">Newest First</option>
                 <option value="oldest">Oldest First</option>
@@ -594,7 +586,7 @@ export default function ReportsAnalytics() {
                 variant="outline"
                 size="sm"
                 onClick={resetFilters}
-                className="h-9 gap-1 text-gray-600 border-gray-300"
+                className="gap-1 text-muted-foreground"
               >
                 <FilterXIcon className="w-3.5 h-3.5" /> Clear Filters
               </Button>
@@ -604,68 +596,84 @@ export default function ReportsAnalytics() {
           <ScrollArea className="h-[400px]">
             <div className="space-y-3 pb-4">
                {filteredHistory.length === 0 ? (
-                 <div className="flex flex-col items-center text-center py-10 text-gray-400">
-                   <FilterXIcon className="w-8 h-8 mb-2" />
-                   <p className="text-sm font-medium text-gray-500">No batches match your filters.</p>
+                  <div className="flex flex-col items-center text-center py-10 text-muted-foreground">
+                    <FilterXIcon className="w-8 h-8 mb-2" />
+                    <p className="text-sm font-medium">No batches match your filters.</p>
                    <Button variant="outline" size="sm" onClick={resetFilters} className="mt-3">
                      Clear Filters
                    </Button>
                  </div>
                ) : (
                filteredHistory.map((report) => (
-                 <Card key={report.id} className="overflow-hidden border-l-4 border-green-600 shadow-sm">
-                   <CardContent className="p-4">
-                     <div className="flex justify-between items-start mb-3">
-                       <div>
-                         <p className="font-bold text-sm text-gray-900">{report.batchId}</p>
-                          <p className="text-xs text-gray-500">Started: {report.startDate || "Unknown"}</p>
-                          <p className="text-xs text-gray-500">Completed: {typeof report.completedAt === "number" ? new Date(report.completedAt).toLocaleDateString() : "Unknown"}</p>
-                       </div>
-                       <div className="flex flex-col items-end gap-1">
-                         <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200">
-                           {report.finalYield} Yield
-                         </Badge>
-                         <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200">
-                           {report.fruitsUsed} Fruit
-                         </Badge>
-                       </div>
-                     </div>
-                     
-                     <div className="grid grid-cols-3 gap-3 pt-3 border-t border-gray-100">
-                       <div>
-                         <p className="text-[10px] text-gray-500 uppercase font-bold tracking-wider">Avg Temp</p>
-                         <p className="text-sm font-medium">{report.averageTemp}°C</p>
-                       </div>
-                       <div>
-                         <p className="text-[10px] text-gray-500 uppercase font-bold tracking-wider">Avg Acidity</p>
-                         <p className="text-sm font-medium">{report.averagePh} pH</p>
-                       </div>
+                  <Card
+                    key={report.id}
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => setSelectedReport(report)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        setSelectedReport(report);
+                      }
+                    }}
+                    className="overflow-hidden border-l-4 border-l-emerald-600 cursor-pointer transition-colors hover:border-primary/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    <CardContent className="p-4">
+                      <div className="flex justify-between items-start mb-3">
+                        <div>
+                          <p className="font-bold text-sm text-foreground">{report.batchId}</p>
+                           <p className="text-xs text-muted-foreground">Started: {report.startDate || "Unknown"}</p>
+                           <p className="text-xs text-muted-foreground">Completed: {typeof report.completedAt === "number" ? new Date(report.completedAt).toLocaleDateString() : "Unknown"}</p>
+                        </div>
+                        <div className="flex flex-col items-end gap-1">
+                          <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-200 rounded-full">
+                            {report.finalYield} Yield
+                          </Badge>
+                          <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200 rounded-full">
+                            {report.fruitsUsed} Fruit
+                          </Badge>
+                        </div>
+                      </div>
+                      
+                      <div className="grid grid-cols-3 gap-3 pt-3 border-t border-border">
+                        <div>
+                          <p className="text-xs text-muted-foreground uppercase font-semibold tracking-wider">Avg Temp</p>
+                          <p className="text-sm font-medium">{report.averageTemp}°C</p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-muted-foreground uppercase font-semibold tracking-wider">Avg Acidity</p>
+                          <p className="text-sm font-medium">{report.averagePh} pH</p>
+                        </div>
 <div>
-                          <p className="text-[10px] text-gray-500 uppercase font-bold tracking-wider">Final Brix</p>
-                          <p className="text-sm font-medium text-[#8B1538]">{report.targetBrixAchieved}</p>
+                           <p className="text-xs text-muted-foreground uppercase font-semibold tracking-wider">Final Brix</p>
+                           <p className="text-sm font-medium text-primary">{report.targetBrixAchieved}</p>
                         </div>
                       </div>
 
                       {/* AI ACCURACY — only for batches that captured a live
                           prediction to score (written by batchWrites.ts). */}
                       {report.aiAccuracy && (
-                        <div className="mt-3 pt-3 border-t border-gray-100">
-                          <p className="text-[10px] text-gray-500 uppercase font-bold tracking-wider mb-1">
+                        <div className="mt-3 pt-3 border-t border-border">
+                          <p className="text-xs text-muted-foreground uppercase font-semibold tracking-wider mb-1">
                             AI Prediction Accuracy
                           </p>
-                          <div className="flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-gray-600">
+                          <div className="flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-muted-foreground">
                             {typeof report.aiAccuracy.daysError === "number" && (
                               <span>Predicted {Math.abs(report.aiAccuracy.daysError)} days off</span>
                             )}
                             {typeof report.aiAccuracy.abvError === "number" && (
                               <span>ABV off by {Math.abs(report.aiAccuracy.abvError).toFixed(1)} pts</span>
                             )}
-                            <span className={report.aiAccuracy.qualityMatch ? "text-green-700" : "text-amber-700"}>
+                            <span className={report.aiAccuracy.qualityMatch ? "text-emerald-700" : "text-amber-700"}>
                               {report.aiAccuracy.qualityMatch ? "✓" : "✗"} Quality grade matched
                             </span>
                           </div>
                         </div>
                       )}
+
+                      <p className="mt-3 pt-3 border-t border-border text-xs font-semibold text-primary flex items-center gap-1.5">
+                        <FileTextIcon className="w-3.5 h-3.5" /> View full sensor record
+                      </p>
                    </CardContent>
                  </Card>
                ))
@@ -674,6 +682,14 @@ export default function ReportsAnalytics() {
           </ScrollArea>
         </div>
       )}
+
+      <BatchRecordSheet
+        open={selectedReport !== null}
+        onOpenChange={(o) => {
+          if (!o) setSelectedReport(null);
+        }}
+        report={selectedReport}
+      />
     </div>
   );
 }

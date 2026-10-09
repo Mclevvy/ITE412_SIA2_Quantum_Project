@@ -42,9 +42,9 @@ export function getStatus(value: number | null, min: number, max: number): "Norm
 }
 
 export function badgeClass(status: string) {
-  if (status === "Normal" || status === "On track") return "border-green-500 text-green-600 text-xs";
-  if (status === "Alert" || status === "Check OG") return "border-red-500 text-red-600 text-xs";
-  return "border-gray-300 text-gray-600 text-xs";
+  if (status === "Normal" || status === "On track") return "border-emerald-200 bg-emerald-50 text-emerald-700 text-xs font-semibold";
+  if (status === "Alert" || status === "Check OG") return "border-red-200 bg-red-50 text-[#B91C1C] text-xs font-semibold";
+  return "border-border bg-muted text-muted-foreground text-xs font-semibold";
 }
 
 // Batch-relative sugar status. Fixed bands (e.g. 14-18) penalize normal

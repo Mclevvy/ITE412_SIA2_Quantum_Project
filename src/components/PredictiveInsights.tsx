@@ -12,7 +12,13 @@ import {
   FlaskConicalIcon
 } from 'lucide-react';
 import { motion } from 'motion/react';
-import * as tf from '@tensorflow/tfjs';
+// Import the three tfjs pieces this screen actually uses, not the `@tensorflow/tfjs`
+// umbrella — the umbrella also pulls tfjs-converter + tfjs-data (and every kernel),
+// which dominated the route's bundle. WebGL is the primary backend, CPU the fallback.
+import { tensor2d, type Tensor } from '@tensorflow/tfjs-core';
+import { loadLayersModel, type LayersModel } from '@tensorflow/tfjs-layers';
+import '@tensorflow/tfjs-backend-webgl';
+import '@tensorflow/tfjs-backend-cpu';
 import { db } from '../lib/firebase';
 import { ref, onValue, get, set } from 'firebase/database';
 import { useHistoryList } from '../hooks/useHistoryList';
@@ -21,6 +27,7 @@ import { computeLiveAbvFeatures } from '../lib/abvFeatures';
 import { predictAbv, getModelInfo, predictAbvFromBrixDrop, resolveInitialBrix } from '../lib/abvModel';
 import { sugarCurve, daysToTarget } from '../lib/fermentationCurve';
 import { toFiniteNumber } from '../lib/num';
+import { ABV_PREDICTION_INTERVAL_MS } from '../hooks/useSugarAutoLog';
 const SCALING = {
   brix: { min: 0, max: 30 },
   temp: { min: 15, max: 40 },
@@ -28,14 +35,8 @@ const SCALING = {
 };
 const normalize = (val: number, min: number, max: number) => (val - min) / (max - min);
 
-// How often to re-run the ABV prediction. This one is heavier than the
-// days/quality/risk network above (it reads the full sensor history, not
-// just the latest live reading), so it runs on a timer rather than on
-// every sensor tick.
-const ABV_PREDICTION_INTERVAL_MS = 15 * 60 * 1000; // 15 minutes
-
 export default function PredictiveInsights() {
-  const [model, setModel] = useState<tf.LayersModel | null>(null);
+  const [model, setModel] = useState<LayersModel | null>(null);
   const [modelError, setModelError] = useState<string | null>(null);
   const [currentTemp, setCurrentTemp] = useState<number | null>(null);
   const [currentPh, setCurrentPh] = useState<number | null>(null);
@@ -43,7 +44,7 @@ export default function PredictiveInsights() {
   const [batchDetails, setBatchDetails] = useState<any>(null);
   // Sugar soft sensor inputs: the batch's logged tests + the latest reading.
   const [sugarHistory, setSugarHistory] = useState<Record<string, { brix?: unknown; time?: unknown }> | null>(null);
-  const [sugarCurrent, setSugarCurrent] = useState<{ brix: number; time: number } | null>(null);
+  const [sugarCurrent, setSugarCurrent] = useState<{ brix: number; time: number; source?: string | null } | null>(null);
   
   // Historical reports (shared hook: same path, mapping, newest-first sort)
   const { items: historicalReports } = useHistoryList('fermentation/history', {
@@ -60,7 +61,7 @@ export default function PredictiveInsights() {
   // NEW: ABV prediction state (edge Ridge model — see src/lib/abvModel.ts)
   const [predAbv, setPredAbv] = useState<number | null>(null);
   const [abvHistoryReady, setAbvHistoryReady] = useState(false);
-  const [abvBasis, setAbvBasis] = useState<'measured' | 'estimated'>('estimated');
+  const [abvBasis, setAbvBasis] = useState<'measured' | 'soft' | 'estimated'>('estimated');
   const [abvModelInfo] = useState(() => getModelInfo());
 
   // Refs so the ABV prediction effect (below) can read the LATEST
@@ -75,7 +76,7 @@ export default function PredictiveInsights() {
   useEffect(() => {
     async function loadModel() {
       try {
-        const m = await tf.loadLayersModel('/model_master/model.json');
+        const m = await loadLayersModel('/model_master/model.json');
         setModel(m);
       } catch (e) { 
         console.error("Failed to load Master AI. Check public/model_master/ folder.");
@@ -106,7 +107,13 @@ export default function PredictiveInsights() {
         const brix = toFiniteNumber(value?.brix ?? value?.sugarBrix);
         setCurrentBrix(brix);
         const time = toFiniteNumber(value?.time);
-        setSugarCurrent(brix !== null && time !== null ? { brix, time } : null);
+        // `source` must survive into sugarCurve, or the soft sensor would fit
+        // its own auto-logged estimates (see fermentationCurve.buildPoints).
+        setSugarCurrent(
+          brix !== null && time !== null
+            ? { brix, time, source: typeof value?.source === 'string' ? value.source : null }
+            : null
+        );
       } else {
         setCurrentBrix(null);
         setSugarCurrent(null);
@@ -128,27 +135,62 @@ export default function PredictiveInsights() {
   }, []);
 
   useEffect(() => {
-    if (currentBrix === null || currentTemp === null || currentPh === null || !batchDetails) {
+    // No active batch: nothing to compute (the cards aren't rendered either).
+    if (!batchDetails) {
       setPredDays(null);
+      setPredDaysSource(null);
       setPredQuality(null);
       setPredRisk(null);
-      setPredDaysSource(null);
       return;
     }
 
     const targetBrixNum = batchDetails.targetBrix || 2;
+    const hasInputs = currentBrix !== null && currentTemp !== null && currentPh !== null;
+
+    // Run the net once when it's loaded and all four inputs exist; it yields
+    // all three outputs. Quality + Spoilage Risk are the ONLY outputs that
+    // require the net, so they're computed here — independently of the
+    // ready-now short-circuit below, which used to leave these two cards on
+    // "Calculating…" forever for a batch at/below target.
+    let modelDays: number | null = null;
+    if (model && hasInputs) {
+      const input = tensor2d([[
+        normalize(currentBrix!, SCALING.brix.min, SCALING.brix.max),
+        normalize(currentTemp!, SCALING.temp.min, SCALING.temp.max),
+        normalize(currentPh!, SCALING.ph.min, SCALING.ph.max),
+        normalize(targetBrixNum, SCALING.brix.min, SCALING.brix.max),
+      ]]);
+      const predictions = model.predict(input) as Tensor;
+      const data = predictions.dataSync();
+      input.dispose();
+      predictions.dispose();
+      modelDays = Math.max(0, Math.ceil(data[0]));
+      setPredQuality(Math.min(99, Math.max(1, Math.round(data[1]))));
+      setPredRisk(Math.min(99, Math.max(1, Math.round(data[2]))));
+    } else {
+      setPredQuality(null);
+      setPredRisk(null);
+    }
+
+    // No live reading yet — the cards explain which input is missing rather
+    // than spinners that never resolve.
+    if (!hasInputs) {
+      setPredDays(null);
+      setPredDaysSource(null);
+      return;
+    }
 
     // Already at/below target (same guard FermentationTracker uses): the
     // model would report a fraction of a day forever — ceil then displayed
     // "~1 days" no matter how long the batch sat finished. Say Ready Now.
-    if (currentBrix <= targetBrixNum) {
+    if (currentBrix! <= targetBrixNum) {
       setPredDays(0);
       return;
     }
 
     // Soft sensor first: fit this batch's real sugar logs to a decay curve
-    // (per-batch, self-correcting at every new test). The model below still
-    // supplies quality/risk — only days-remaining prefers real data.
+    // (per-batch, self-correcting at every new test). Only days-remaining
+    // prefers real data; quality/risk above come from the net.
     const curve = sugarCurve(
       { startedAt: batchDetails.startedAt, og: resolveInitialBrix(batchDetails), targetBrix: targetBrixNum },
       sugarHistory,
@@ -156,37 +198,16 @@ export default function PredictiveInsights() {
     );
     const curveDays = curve ? daysToTarget(curve, targetBrixNum, Date.now()) : null;
 
-    // No model: the curve above needs no net, so it still runs. Without
-    // either source the preds stay null (surfaced via the modelError status).
-    if (!model) {
-      if (curveDays !== null) {
-        setPredDays(Math.ceil(curveDays));
-        setPredDaysSource('curve');
-      } else {
-        setPredDays(null);
-        setPredDaysSource(null);
-      }
-      setPredQuality(null);
-      setPredRisk(null);
-      return;
+    if (curveDays !== null) {
+      setPredDays(Math.ceil(curveDays));
+      setPredDaysSource('curve');
+    } else if (modelDays !== null) {
+      setPredDays(modelDays);
+      setPredDaysSource('model');
+    } else {
+      setPredDays(null);
+      setPredDaysSource(null);
     }
-
-    const nBrix = normalize(currentBrix, SCALING.brix.min, SCALING.brix.max);
-    const nTemp = normalize(currentTemp, SCALING.temp.min, SCALING.temp.max);
-    const nPh = normalize(currentPh, SCALING.ph.min, SCALING.ph.max);
-    const nTarget = normalize(targetBrixNum, SCALING.brix.min, SCALING.brix.max);
-
-    const input = tf.tensor2d([[nBrix, nTemp, nPh, nTarget]]);
-    const predictions = model.predict(input) as tf.Tensor;
-    const data = predictions.dataSync(); 
-
-    setPredDays(curveDays !== null ? Math.ceil(curveDays) : Math.max(0, Math.ceil(data[0])));
-    setPredDaysSource(curveDays !== null ? 'curve' : 'model');
-    setPredQuality(Math.min(99, Math.max(1, Math.round(data[1]))));
-    setPredRisk(Math.min(99, Math.max(1, Math.round(data[2]))));
-
-    input.dispose();
-    predictions.dispose();
   }, [currentBrix, currentTemp, currentPh, batchDetails, model, sugarHistory, sugarCurrent]);
 
   // NEW: ABV prediction — reads the full sensor history for the active
@@ -219,11 +240,12 @@ export default function PredictiveInsights() {
         const currentBrixRaw = sugarSnap.exists() ? sugarSnap.val()?.brix : null;
         const currentBrixNum =
           typeof currentBrixRaw === 'number' && Number.isFinite(currentBrixRaw) ? currentBrixRaw : null;
-        const chemistryAbv = predictAbvFromBrixDrop(ogBrix, currentBrixNum);
+        const sugarInstrument = sugarSnap.exists() && typeof sugarSnap.val()?.instrument === 'string' ? sugarSnap.val().instrument : 'hydrometer';
+        const chemistryAbv = predictAbvFromBrixDrop(ogBrix, currentBrixNum, sugarInstrument);
         if (chemistryAbv !== null) {
           if (cancelled) return;
           setAbvHistoryReady(true);
-          setAbvBasis('measured');
+          setAbvBasis(sugarSnap.val()?.source === 'predicted' ? 'soft' : 'measured');
           setPredAbv(chemistryAbv);
           const { predDays: latestDays, predQuality: latestQuality, predRisk: latestRisk } = latestFastPredictionsRef.current;
           await set(ref(db, 'fermentation/currentBatch/aiPrediction'), {
@@ -285,18 +307,28 @@ export default function PredictiveInsights() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [batchDetails]);
 
+  // Why a card has no number yet — the model load and the (rare) live Brix
+  // reading are the real waits, so name the one that's blocking instead of a
+  // "Calculating…" that looks identical in every case.
+  const waitingLabel =
+    currentBrix === null ? 'Waiting for a Brix reading' : 'Waiting for sensor data';
+
   let qualityStatus = 'pending';
-  let qualityLabel = 'Calculating...';
+  let qualityLabel = waitingLabel;
+  if (modelError) qualityLabel = 'Model unavailable';
+  else if (!model) qualityLabel = 'Loading model…';
   if (predQuality !== null) {
     qualityStatus = 'good';
-    qualityLabel = `${predQuality} · Experimental`;
+    qualityLabel = `${predQuality}/100`;
   }
 
   let riskStatus = 'pending';
-  let riskLabel = 'Calculating...';
+  let riskLabel = waitingLabel;
+  if (modelError) riskLabel = 'Model unavailable';
+  else if (!model) riskLabel = 'Loading model…';
   if (predRisk !== null) {
     riskStatus = 'good';
-    riskLabel = `${predRisk} · Experimental risk signal`;
+    riskLabel = `${predRisk}/100`;
   }
 
   let expectedYield = "Calculating...";
@@ -326,6 +358,8 @@ export default function PredictiveInsights() {
     abvStatus = 'good';
     if (abvBasis === 'measured') {
       abvDetails = 'From sugar drop (measured)';
+    } else if (abvBasis === 'soft') {
+      abvDetails = 'From sugar drop (soft-sensor estimate)';
     } else {
       abvDetails = 'Rough estimate (unvalidated model)';
       if (cappedAbv > 12) {
@@ -348,21 +382,21 @@ export default function PredictiveInsights() {
     {
       id: 2,
       title: 'Quality Score',
-      valueLabel: 'Model output (uncalibrated, synthetic-trained)',
+      valueLabel: 'Model score 0–100 · higher is better',
       prediction: qualityLabel,
       status: qualityStatus,
       icon: AwardIcon,
-      details: 'Experimental quality signal (synthetic-trained)',
-      color: 'from-[#8B1538] to-[#6B1028]',
+      details: 'Uncalibrated estimate from temperature, pH & Brix — not a lab measurement',
+      color: 'from-primary to-primary/60',
     },
     {
       id: 3,
       title: 'Spoilage Risk',
-      valueLabel: 'Model risk signal (uncalibrated)',
+      valueLabel: 'Model risk 0–100 · lower is better',
       prediction: riskLabel,
       status: riskStatus,
       icon: AlertTriangleIcon,
-      details: 'From current temperature, pH & Brix',
+      details: 'Uncalibrated estimate from temperature, pH & Brix — not a lab test',
       color: 'from-blue-500 to-cyan-600',
     },
     {
@@ -373,7 +407,7 @@ export default function PredictiveInsights() {
       status: 'good',
       icon: SparklesIcon,
       details: 'Rough estimate (assumes ~10% loss)',
-      color: 'from-[#6B2C5D] to-[#4B1C3D]',
+      color: 'from-secondary-foreground to-secondary-foreground/60',
     },
     {
       id: 5,
@@ -388,26 +422,26 @@ export default function PredictiveInsights() {
   ];
 
   return (
-    <div className="p-4 space-y-4 pb-20">
+    <div className="p-4 space-y-4 pb-20 max-w-xl mx-auto">
       <div className="flex justify-between items-center">
         <div>
-          <h1 className="text-gray-900 font-bold text-xl">Predictive Insights</h1>
-          <p className="text-sm text-gray-500">Sensor-based estimates & model projections</p>
+          <h1 className="text-foreground font-bold text-xl">Predictive Insights</h1>
+          <p className="text-sm text-muted-foreground">Sensor-based estimates & model projections</p>
         </div>
-        <BrainCircuitIcon className="w-6 h-6 text-[#8B1538]" />
+        <BrainCircuitIcon className="w-6 h-6 text-primary" />
       </div>
 
-      <Card className="bg-gradient-to-r from-purple-50 to-pink-50 border-purple-200">
+      <Card className="bg-card border-border">
         <CardContent className="p-4">
           <div className="flex items-center gap-3">
             <motion.div animate={{ rotate: 360 }} transition={{ duration: 3, repeat: Infinity, ease: "linear" }}>
-              <SparklesIcon className="w-6 h-6 text-[#6B2C5D]" />
+              <SparklesIcon className="w-6 h-6 text-secondary-foreground" />
             </motion.div>
             <div>
-              <p className="text-gray-900 font-bold">
+              <p className="text-foreground font-bold">
                 {model ? "Model loaded" : modelError ?? "Initializing AI Engine..."}
               </p>
-              <p className="text-xs text-gray-600">Sensor updated: {lastUpdated}</p>
+              <p className="text-xs text-muted-foreground">Sensor updated: {lastUpdated}</p>
             </div>
           </div>
         </CardContent>
@@ -430,19 +464,19 @@ export default function PredictiveInsights() {
                         </div>
                         <div>
                           <CardTitle className="text-sm">{insight.title}</CardTitle>
-                          <p className="text-xs text-gray-500 mt-1">{insight.details}</p>
+                          <p className="text-xs text-muted-foreground mt-1">{insight.details}</p>
                         </div>
                       </div>
                     </div>
                   </CardHeader>
                   <CardContent className="space-y-3">
                     <div className="flex items-center justify-between">
-                      <span className="text-sm text-gray-600">{insight.valueLabel}</span>
-                      <span className="text-gray-900 font-bold text-right">{insight.prediction}</span>
+                      <span className="text-sm text-muted-foreground">{insight.valueLabel}</span>
+                      <span className="text-foreground font-bold text-right tnum">{insight.prediction}</span>
                     </div>
-                    <div className="flex items-center justify-between pt-2 border-t mt-2">
-                      <span className="text-xs text-gray-500 uppercase font-medium">Status</span>
-                      <Badge variant="outline" className={insight.status === 'optimal' || insight.status === 'excellent' ? 'border-green-500 text-green-600 bg-green-50' : insight.status === 'good' || insight.status === 'safe' ? 'border-blue-500 text-blue-600 bg-blue-50' : 'border-amber-500 text-amber-600 bg-amber-50'}>
+                    <div className="flex items-center justify-between pt-2 border-t border-border mt-2">
+                      <span className="text-xs text-muted-foreground uppercase font-medium">Status</span>
+                      <Badge variant="outline" className={insight.status === 'optimal' || insight.status === 'excellent' ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : insight.status === 'good' || insight.status === 'safe' ? 'border-blue-200 bg-blue-50 text-blue-700' : 'border-amber-200 bg-amber-50 text-amber-700'}>
                         {insight.status.charAt(0).toUpperCase() + insight.status.slice(1)}
                       </Badge>
                     </div>
@@ -453,63 +487,63 @@ export default function PredictiveInsights() {
           })}
         </div>
       ) : (
-        <Card className="bg-gray-50 border-dashed py-8">
-           <CardContent className="text-center text-gray-500">
+        <Card className="bg-muted border-dashed py-8">
+           <CardContent className="text-center text-muted-foreground">
               <p>No active batch to analyze.</p>
               <p className="text-xs mt-1">Start a new batch in the Tracker to see live insights.</p>
            </CardContent>
         </Card>
       )}
 
-      <Card className="bg-gray-50 border-gray-200">
+      <Card className="bg-muted border-border">
         <CardHeader className="pb-2"><CardTitle className="text-sm">Model Specifications</CardTitle></CardHeader>
         <CardContent className="space-y-2">
-          <div className="flex justify-between text-xs"><span className="text-gray-500">Architecture</span><span className="text-gray-900 font-medium">Multi-Output Dense Network</span></div>
-          <div className="flex justify-between text-xs"><span className="text-gray-500">Training Data</span><span className="text-gray-900 font-medium">50,000 synthetic batches</span></div>
-          <div className="flex justify-between text-xs"><span className="text-gray-500">Processor</span><span className="text-green-600 font-bold">TensorFlow.js (Edge AI)</span></div>
-          <div className="flex justify-between text-xs pt-2 border-t border-gray-200 mt-2"><span className="text-gray-500">ABV Model</span><span className="text-gray-900 font-medium">Ridge Regression (Edge)</span></div>
-          <div className="flex justify-between text-xs"><span className="text-gray-500">ABV Training Batches</span><span className="text-gray-900 font-medium">{abvModelInfo.nTrainingSamples} (synthetic)</span></div>
+          <div className="flex justify-between text-xs"><span className="text-muted-foreground">Architecture</span><span className="text-foreground font-medium">Multi-Output Dense Network</span></div>
+          <div className="flex justify-between text-xs"><span className="text-muted-foreground">Training Data</span><span className="text-foreground font-medium">50,000 synthetic batches</span></div>
+          <div className="flex justify-between text-xs"><span className="text-muted-foreground">Processor</span><span className="text-emerald-700 font-bold">TensorFlow.js (Edge AI)</span></div>
+          <div className="flex justify-between text-xs pt-2 border-t border-border mt-2"><span className="text-muted-foreground">ABV Model</span><span className="text-foreground font-medium">Ridge Regression (Edge)</span></div>
+          <div className="flex justify-between text-xs"><span className="text-muted-foreground">ABV Training Batches</span><span className="text-foreground font-medium">{abvModelInfo.nTrainingSamples} (synthetic)</span></div>
         </CardContent>
       </Card>
 
       {/* ✅ ADDED: HISTORICAL AI REPORTS */}
       {historicalReports.length > 0 && (
-        <div className="pt-6 mt-6 border-t border-gray-200 space-y-4">
-          <h2 className="font-bold text-gray-900 flex items-center gap-2">
-            <FileTextIcon className="w-5 h-5 text-[#8B1538]" /> Batch Reports
+        <div className="pt-6 mt-6 border-t border-border space-y-4">
+          <h2 className="font-bold text-foreground flex items-center gap-2">
+            <FileTextIcon className="w-5 h-5 text-primary" /> Batch Reports
           </h2>
-          <p className="text-xs text-gray-500 mb-2">Final metrics of completed batches.</p>
+          <p className="text-xs text-muted-foreground mb-2">Final metrics of completed batches.</p>
           
           <ScrollArea className="h-64">
             <div className="space-y-3 pb-4">
                {historicalReports.map((report) => (
-                 <Card key={report.id} className="overflow-hidden border-l-4 border-[#8B1538]">
+                 <Card key={report.id} className="overflow-hidden border-l-4 border-l-primary">
                    <CardContent className="p-4">
                      <div className="flex justify-between items-start mb-3">
                        <div>
-                         <p className="font-bold text-sm text-gray-900">{report.batchId}</p>
-                         <p className="text-xs text-gray-500">Completed: {new Date(report.completedAt).toLocaleDateString()}</p>
+                         <p className="font-bold text-sm text-foreground">{report.batchId}</p>
+                         <p className="text-xs text-muted-foreground">Completed: {new Date(report.completedAt).toLocaleDateString()}</p>
                        </div>
-                       <Badge variant="outline" className="bg-purple-50 text-purple-700 border-purple-200">
+                       <Badge variant="outline" className="bg-secondary text-secondary-foreground border-border">
                          {report.finalYield} Generated
                        </Badge>
                      </div>
                      
-                     <div className="grid grid-cols-2 gap-3 pt-3 border-t border-gray-100">
+                     <div className="grid grid-cols-2 gap-3 pt-3 border-t border-border">
                        <div>
-                         <p className="text-[10px] text-gray-500 uppercase font-bold tracking-wider">Avg Temp</p>
+                         <p className="text-xs text-muted-foreground uppercase font-semibold tracking-wider">Avg Temp</p>
                          <p className="text-sm font-medium">{report.averageTemp}°C</p>
                        </div>
                        <div>
-                         <p className="text-[10px] text-gray-500 uppercase font-bold tracking-wider">Avg Acidity</p>
+                         <p className="text-xs text-muted-foreground uppercase font-semibold tracking-wider">Avg Acidity</p>
                          <p className="text-sm font-medium">{report.averagePh} pH</p>
                        </div>
                        <div>
-                         <p className="text-[10px] text-gray-500 uppercase font-bold tracking-wider">Target Brix</p>
-                         <p className="text-sm font-medium text-green-600">{report.targetBrixAchieved}</p>
+                         <p className="text-xs text-muted-foreground uppercase font-semibold tracking-wider">Target Brix</p>
+                         <p className="text-sm font-medium text-emerald-700">{report.targetBrixAchieved}</p>
                        </div>
                        <div>
-                         <p className="text-[10px] text-gray-500 uppercase font-bold tracking-wider">Fruit Used</p>
+                         <p className="text-xs text-muted-foreground uppercase font-semibold tracking-wider">Fruit Used</p>
                          <p className="text-sm font-medium">{report.fruitsUsed}</p>
                        </div>
                      </div>

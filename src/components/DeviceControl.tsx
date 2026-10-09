@@ -132,12 +132,12 @@ function WifiSetupModal({
       <motion.div
         initial={{ opacity: 0, y: 30, scale: 0.98 }}
         animate={{ opacity: 1, y: 0, scale: 1 }}
-        className="relative w-full sm:max-w-lg bg-white rounded-t-2xl sm:rounded-2xl shadow-xl p-4 sm:p-5"
+        className="relative w-full sm:max-w-lg bg-card rounded-t-3xl sm:rounded-2xl shadow-xl p-4 sm:p-5"
       >
         <div className="flex items-center justify-between">
           <div>
-            <p className="text-gray-900 font-semibold">Configure Wi-Fi</p>
-            <p className="text-sm text-gray-500">{deviceName}</p>
+            <p className="text-foreground font-semibold">Configure Wi-Fi</p>
+            <p className="text-sm text-muted-foreground">{deviceName}</p>
           </div>
           <Button variant="outline" size="icon" onClick={onClose} aria-label="Close">
             <XIcon className="w-4 h-4" />
@@ -149,7 +149,7 @@ function WifiSetupModal({
             <CardHeader className="py-3">
               <CardTitle className="text-sm">Steps</CardTitle>
             </CardHeader>
-            <CardContent className="space-y-2 text-sm text-gray-600">
+            <CardContent className="space-y-2 text-sm text-muted-foreground">
               <div className="flex gap-2">
                 <Badge variant="outline" className="text-xs">
                   1
@@ -215,7 +215,7 @@ function WifiSetupModal({
               </div>
 
               <Button
-                className="w-full bg-[#8B1538] hover:bg-[#6B1028]"
+                className="w-full"
                 onClick={saveWifi}
                 disabled={status === "saving" || !ssid.trim()}
               >
@@ -224,19 +224,19 @@ function WifiSetupModal({
 
               {status !== "idle" && (
                 <div
-                  className={`text-sm p-2 rounded ${
+                  className={`text-sm p-2 rounded-xl border ${
                     status === "ok"
-                      ? "bg-green-50 text-green-700"
+                      ? "bg-emerald-50 text-emerald-700 border-emerald-200"
                       : status === "fail"
-                      ? "bg-red-50 text-red-700"
-                      : "bg-gray-50 text-gray-700"
+                      ? "bg-red-50 text-[#B91C1C] border-red-200"
+                      : "bg-muted text-muted-foreground border-border"
                   }`}
                 >
                   {msg}
                 </div>
               )}
 
-              <p className="text-xs text-gray-500 pt-1">
+              <p className="text-xs text-muted-foreground pt-1">
                 This works only while the device is in Setup Mode and you are connected to its
                 hotspot.
               </p>
@@ -592,7 +592,7 @@ export default function DeviceControl() {
   );
 
   return (
-    <div className="p-4 space-y-4 pb-28">
+    <div className="p-4 space-y-4 pb-20 max-w-xl mx-auto">
       <WifiSetupModal
         open={wifiModalOpen}
         onClose={() => setWifiModalOpen(false)}
@@ -601,33 +601,33 @@ export default function DeviceControl() {
 
       <div className="flex justify-between items-center">
         <div>
-          <h1 className="text-gray-900">Device Control</h1>
-          <p className="text-sm text-gray-500">Manage your IoT devices</p>
+          <h1 className="text-foreground font-bold text-xl">Device Control</h1>
+          <p className="text-sm text-muted-foreground">Manage your IoT devices</p>
         </div>
-        <SettingsIcon className="w-6 h-6 text-[#8B1538]" />
+        <SettingsIcon className="w-6 h-6 text-primary" />
       </div>
 
       <div className="grid grid-cols-2 gap-3">
-        <Card className="bg-gradient-to-br from-[#2D5016] to-[#1D3010] text-white">
+        <Card>
           <CardContent className="p-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-white">
+                <p className="text-foreground font-bold text-2xl tnum">
                   {onlineDevices}/{totalDevices}
                 </p>
-                <p className="text-xs opacity-90 mt-1">Devices Online</p>
+                <p className="text-xs text-muted-foreground mt-1">Devices Online</p>
               </div>
-              <WifiIcon className="w-8 h-8 opacity-80" />
+              <WifiIcon className="w-8 h-8 text-emerald-600" />
             </div>
           </CardContent>
         </Card>
 
-        <Card className="bg-gradient-to-br from-[#8B1538] to-[#6B1028] text-white">
+        <Card>
           <CardContent className="p-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-white">{systemActive ? "Active" : "Inactive"}</p>
-                <p className="text-xs opacity-90 mt-1">System Status</p>
+                <p className="text-foreground font-bold text-2xl">{systemActive ? "Active" : "Inactive"}</p>
+                <p className="text-xs text-muted-foreground mt-1">System Status</p>
               </div>
               <motion.div
                 animate={systemActive ? { scale: [1, 1.2, 1] } : { scale: 1 }}
@@ -646,7 +646,7 @@ export default function DeviceControl() {
       </Button>
 
       <div>
-        <h2 className="text-gray-900 mb-3">Connected Devices</h2>
+        <h2 className="text-foreground font-bold mb-3">Connected Devices</h2>
         <div className="space-y-3">
           {devices.map((device, index) => {
             const Icon = device.icon;
@@ -664,30 +664,30 @@ export default function DeviceControl() {
                       <div
                         className={`w-12 h-12 rounded-full flex items-center justify-center ${
                           device.status === "online"
-                            ? "bg-green-100"
+                            ? "bg-emerald-100"
                             : device.status === "manual"
-                            ? "bg-purple-100"
-                            : "bg-gray-100"
+                            ? "bg-secondary"
+                            : "bg-muted"
                         }`}
                       >
                         <Icon
                           className={`w-6 h-6 ${
                             device.status === "online"
-                              ? "text-green-600"
+                              ? "text-emerald-700"
                               : device.status === "manual"
-                              ? "text-[#6B2C5D]"
-                              : "text-gray-400"
+                              ? "text-secondary-foreground"
+                              : "text-muted-foreground"
                           }`}
                         />
                       </div>
 
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
-                          <p className="text-gray-900">{device.name}</p>
+                          <p className="text-foreground font-medium">{device.name}</p>
                           {device.status === "online" && (
                             <Badge
                               variant="outline"
-                              className="border-green-500 text-green-600 text-xs"
+                              className="bg-emerald-50 border-emerald-200 text-emerald-700 rounded-full text-xs"
                             >
                               <WifiIcon className="w-3 h-3 mr-1" />
                               Online
@@ -696,7 +696,7 @@ export default function DeviceControl() {
                           {device.status === "offline" && (
                             <Badge
                               variant="outline"
-                              className="border-gray-400 text-gray-500 text-xs"
+                              className="bg-muted border-border text-muted-foreground rounded-full text-xs"
                             >
                               <WifiOffIcon className="w-3 h-3 mr-1" />
                               Offline
@@ -705,27 +705,27 @@ export default function DeviceControl() {
                           {device.status === "manual" && (
                             <Badge
                               variant="outline"
-                              className="border-purple-400 text-[#6B2C5D] text-xs"
+                              className="bg-secondary border-border text-secondary-foreground rounded-full text-xs"
                             >
                               Manual Entry
                             </Badge>
                           )}
 
                           {device.status !== "manual" && (device.enabled ? (
-                            <Badge variant="outline" className="text-xs">
+                            <Badge variant="outline" className="rounded-full text-xs">
                               Enabled
                             </Badge>
                           ) : (
                             <Badge
                               variant="outline"
-                              className="border-amber-500 text-amber-600 text-xs"
+                              className="bg-amber-50 border-amber-200 text-amber-700 rounded-full text-xs"
                             >
                               Disabled
                             </Badge>
                           ))}
                         </div>
 
-                        <p className="text-sm text-gray-500 mt-1">
+                        <p className="text-sm text-muted-foreground mt-1">
                           {device.value} • {device.lastUpdate}
                         </p>
                       </div>
@@ -739,7 +739,6 @@ export default function DeviceControl() {
                             loadingId === device.id ||
                             device.controlKey !== "sugarMonitor"
                           }
-                          className="data-[state=checked]:bg-[#8B1538]"
                         />
                       )}
                     </div>
@@ -753,7 +752,7 @@ export default function DeviceControl() {
                         >
                           Change Wi-Fi (Setup Mode)
                         </Button>
-                        <p className="text-xs text-gray-500 mt-2">
+                        <p className="text-xs text-muted-foreground mt-2">
                           Use this when deploying to a different network while the device is sealed. Covers the temperature &amp; pH sensor module.
                         </p>
                       </div>
@@ -772,24 +771,24 @@ export default function DeviceControl() {
         </CardHeader>
         <CardContent className="space-y-3">
           <div className="flex justify-between text-sm">
-            <span className="text-gray-600">Network Latency</span>
-            <span className="text-green-600">
+            <span className="text-muted-foreground">Network Latency</span>
+            <span className="text-emerald-700">
               {systemActive ? "Connected" : "Unavailable"}
             </span>
           </div>
           <div className="flex justify-between text-sm">
-            <span className="text-gray-600">Data Accuracy</span>
-            <span className="text-green-600">
+            <span className="text-muted-foreground">Data Accuracy</span>
+            <span className="text-emerald-700">
               {systemActive ? "98.5%" : "Unavailable"}
             </span>
           </div>
           <div className="flex justify-between text-sm">
-            <span className="text-gray-600">Last Calibration</span>
-            <span className="text-gray-900">Oct 15, 2025</span>
+            <span className="text-muted-foreground">Last Calibration</span>
+            <span className="text-foreground">Oct 15, 2025</span>
           </div>
           <div className="flex justify-between text-sm">
-            <span className="text-gray-600">Next Maintenance</span>
-            <span className="text-amber-600">In 12 days</span>
+            <span className="text-muted-foreground">Next Maintenance</span>
+            <span className="text-amber-700">In 12 days</span>
           </div>
         </CardContent>
       </Card>
