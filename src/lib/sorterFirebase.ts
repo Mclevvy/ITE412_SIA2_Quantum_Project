@@ -15,14 +15,29 @@ const sorterConfig = {
   projectId: import.meta.env.VITE_SORTER_PROJECT_ID,
 };
 
-export const isSorterConfigured = Boolean(
-  sorterConfig.apiKey && sorterConfig.databaseURL && sorterConfig.projectId
+const configPresent = Boolean(
+  sorterConfig.apiKey &&
+    sorterConfig.projectId &&
+    typeof sorterConfig.databaseURL === "string" &&
+    sorterConfig.databaseURL.startsWith("https://")
 );
 
-export const sorterDb: Database | null = isSorterConfigured
-  ? getDatabase(
+// A malformed URL makes getDatabase throw. Contain it here: batchWrites imports
+// this module, so an import-time throw would take Start Batch (and more) down
+// with it — far beyond the one page we're willing to sacrifice.
+function createSorterDb(): Database | null {
+  if (!configPresent) return null;
+  try {
+    return getDatabase(
       // Reuse the app across HMR reloads instead of calling initializeApp twice.
       getApps().find((a) => a.name === SORTER_APP_NAME) ??
         initializeApp(sorterConfig, SORTER_APP_NAME)
-    )
-  : null;
+    );
+  } catch {
+    return null;
+  }
+}
+
+/** The sorter database, or null when unconfigured *or* init failed — callers
+ *  treat null as "unavailable" and degrade this one page. */
+export const sorterDb: Database | null = createSorterDb();

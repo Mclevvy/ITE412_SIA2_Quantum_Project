@@ -57,7 +57,7 @@ VITE_SORTER_PROJECT_ID=YOUR_SORTER_PROJECT_ID
 
 - [ ] **Step 3: Set real values in local `.env`**
 
-Add the three `VITE_SORTER_*` keys to the gitignored `.env` with the `bignaysorter` web config (apiKey `AIzaSyDEUjHkxyi78V7S1fF-lJq6zwZF8_cg658`, databaseURL `https://bignaysorter-default-rtdb.firebaseio.com`, projectId `bignaysorter`). Do not commit `.env`.
+Add the three `VITE_SORTER_*` keys to the gitignored `.env` with the `bignaysorter` web config (values from the sorter project's Firebase console — see the local `.env`, never committed). Do not commit `.env`.
 
 - [ ] **Step 4: Verify build + typecheck**
 

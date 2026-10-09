@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { onValue, ref } from "firebase/database";
 import { db } from "../lib/firebase";
-import { isSorterConfigured, sorterDb } from "../lib/sorterFirebase";
+import { sorterDb } from "../lib/sorterFirebase";
 import { summarizeSorting, type SorterEntry } from "../lib/sortingStats";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Badge } from "./ui/badge";
@@ -22,15 +22,24 @@ function formatWeight(grams: number): string {
 export default function FruitSorting() {
   const [batch, setBatch] = useState<BatchDetails | null>(null);
   const [batchLoaded, setBatchLoaded] = useState(false);
+  const [batchError, setBatchError] = useState(false);
   const [entries, setEntries] = useState<Record<string, SorterEntry> | null>(null);
-  const [sorterError, setSorterError] = useState<string | null>(null);
+  const [sorterError, setSorterError] = useState(false);
 
   // Active batch: its id and the sorting baseline captured at Start Batch.
   useEffect(() => {
-    return onValue(ref(db, "fermentation/currentBatch/details"), (snap) => {
-      setBatch(snap.exists() ? (snap.val() as BatchDetails) : null);
-      setBatchLoaded(true);
-    });
+    return onValue(
+      ref(db, "fermentation/currentBatch/details"),
+      (snap) => {
+        setBatch(snap.exists() ? (snap.val() as BatchDetails) : null);
+        setBatchError(false);
+        setBatchLoaded(true);
+      },
+      () => {
+        setBatchError(true); // don't hang on "Loading…" forever
+        setBatchLoaded(true);
+      }
+    );
   }, []);
 
   // The sorting machine's append-only log (separate project, read-only).
@@ -40,9 +49,9 @@ export default function FruitSorting() {
       ref(sorterDb, "bignay_sorter"),
       (snap) => {
         setEntries(snap.exists() ? (snap.val() as Record<string, SorterEntry>) : {});
-        setSorterError(null);
+        setSorterError(false);
       },
-      (err) => setSorterError(err.message)
+      () => setSorterError(true)
     );
   }, []);
 
@@ -58,17 +67,19 @@ export default function FruitSorting() {
 
   const blockedMessage = !batchLoaded
     ? "Loading batch…"
-    : !batch
-      ? "No active batch — start one in the Tracker."
-      : !isSorterConfigured
-        ? "Sorter not configured. Add the VITE_SORTER_* keys to .env."
-        : sorterError
-          ? "Sorter unreachable — check the bignaysorter connection."
-          : !baselinePresent
-            ? "Baseline not captured for this batch (started while the sorter was offline)."
-            : entries !== null && summary === null
-              ? "Sorting log was reset — counts can't be attributed to this batch."
-              : null;
+    : batchError
+      ? "Couldn't read the active batch — check your connection."
+      : !batch
+        ? "No active batch — start one in the Tracker."
+        : !sorterDb
+          ? "Sorter not available — check the VITE_SORTER_* keys in .env."
+          : sorterError
+            ? "Sorter unreachable — check the bignaysorter connection."
+            : !baselinePresent
+              ? "Baseline not captured for this batch (started while the sorter was offline)."
+              : entries !== null && summary === null
+                ? "Sorting log was reset — counts can't be attributed to this batch."
+                : null;
 
   return (
     <div className="p-4 space-y-4 pb-20 max-w-xl mx-auto">

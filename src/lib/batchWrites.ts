@@ -19,7 +19,7 @@ import { get, push, ref, update } from "firebase/database";
 import type { Database } from "firebase/database";
 import { predictAbvFromBrixDrop, resolveInitialBrix } from "./abvFeatures";
 import { toPoints } from "./sensorFormat";
-import { isSorterConfigured, sorterDb } from "./sorterFirebase";
+import { sorterDb } from "./sorterFirebase";
 import { latestEntryKey, type SorterEntry } from "./sortingStats";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -176,11 +176,20 @@ export async function startBatch({
   // ponytail: cross-project read on Start Batch; move to a background retry if
   // it ever adds noticeable latency.
   let sortingBaseline: { key: string | null } | undefined;
-  if (isSorterConfigured && sorterDb) {
+  if (sorterDb) {
     try {
       const sorterSnap = await get(ref(sorterDb, "bignay_sorter"));
-      const entries = sorterSnap.exists() ? (sorterSnap.val() as Record<string, SorterEntry>) : {};
-      sortingBaseline = { key: latestEntryKey(entries) };
+      if (!sorterSnap.exists()) {
+        sortingBaseline = { key: null }; // log empty at start → this batch owns every later entry
+      } else {
+        const raw = sorterSnap.val();
+        // A non-object node is a *broken* log, not an empty one: leave the field
+        // absent so the page says "baseline not captured", never attribute the
+        // whole historical log to this batch.
+        if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+          sortingBaseline = { key: latestEntryKey(raw as Record<string, SorterEntry>) };
+        }
+      }
     } catch {
       // leave undefined — surfaced by the UI as "baseline not captured"
     }

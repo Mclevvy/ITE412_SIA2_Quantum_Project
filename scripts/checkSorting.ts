@@ -11,6 +11,14 @@ assert.deepEqual(sortedKeys({ '-Nzz': { value: 'pass' }, '-Naa': { value: 'rejec
 assert.equal(latestEntryKey({ b1: { value: 'pass' }, b10: { value: 'pass' }, b2: { value: 'pass' } }), 'b10');
 assert.equal(latestEntryKey({}), null);
 
+// a stray non-`b<n>` key must not flip the ordering of the `b<n>` keys
+assert.deepEqual(sortedKeys({ b2: { value: 'pass' }, b10: { value: 'pass' }, '-Meta': { value: 'pass' } }),
+                 ['b2', 'b10', '-Meta']);
+// ...so slicing stays correct even with a stray key present
+assert.deepEqual(
+  summarizeSorting({ b9: { value: 'pass' }, b10: { value: 'reject' }, b2: { value: 'pass' }, '-Meta': {} }, 'b9'),
+  { total: 1, passed: 0, rejected: 1, estimatedWeightG: 0.30 });
+
 // baseline null (empty log at start) -> all entries
 assert.deepEqual(summarizeSorting({ b1: { value: 'pass' }, b2: { value: 'reject' } }, null),
                  { total: 2, passed: 1, rejected: 1, estimatedWeightG: 0.45 + 0.30 });

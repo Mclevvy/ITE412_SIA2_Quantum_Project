@@ -15,26 +15,29 @@ export type SortSummary = {
   estimatedWeightG: number;
 };
 
-/** Numeric part of a `b<n>` key, or null when the key isn't that shape. */
+/** Numeric part of a `b<n>` key, or null when the key isn't that shape.
+ *  Digit run is capped so a pathologically long key can't overflow to Infinity. */
 function numericKey(key: string): number | null {
-  const match = /^b(\d+)$/.exec(key);
+  const match = /^b(\d{1,15})$/.exec(key);
   return match ? Number(match[1]) : null;
 }
 
 /**
- * Log keys in insertion order. The sorter writes `b1, b2, … b10`, which sorts
- * wrong lexicographically (b10 before b2), so parse the suffix when every key
- * has that shape; otherwise fall back to key order (Firebase push IDs are
- * lexicographically chronological).
+ * Log keys in insertion order. `b<n>` keys compare numerically (so `b10` follows
+ * `b9`); every other key compares lexicographically (Firebase push IDs are
+ * lexicographically chronological). The decision is per pair, not global — a
+ * single stray non-`b<n>` key must not flip the ordering of all the others and
+ * silently shuffle entries across a batch boundary.
  */
 export function sortedKeys(entries: Record<string, SorterEntry>): string[] {
-  const keys = Object.keys(entries);
-  const allNumeric = keys.every((k) => numericKey(k) !== null);
-  return keys.sort(
-    allNumeric
-      ? (a, b) => (numericKey(a) as number) - (numericKey(b) as number)
-      : (a, b) => (a < b ? -1 : a > b ? 1 : 0)
-  );
+  return Object.keys(entries).sort((a, b) => {
+    const na = numericKey(a);
+    const nb = numericKey(b);
+    if (na !== null && nb !== null) return na - nb;
+    if (na !== null) return -1; // numeric keys before non-numeric
+    if (nb !== null) return 1;
+    return a < b ? -1 : a > b ? 1 : 0;
+  });
 }
 
 /** Last key in insertion order, or null when the log is empty. */
