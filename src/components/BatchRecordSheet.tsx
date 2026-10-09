@@ -59,6 +59,12 @@ export default function BatchRecordSheet({ open, onOpenChange, report }: BatchRe
   const [notFound, setNotFound] = useState(false);
 
   const historyKey: string | null = report?.id ?? null;
+  const harvest = report?.harvest;
+  // Strict `typeof number`: Number("") / Number([]) / Number(false) are all 0,
+  // which would render a fabricated "0 kg" for a malformed record instead of "—".
+  const ripeKg = typeof harvest?.ripeKg === "number" && Number.isFinite(harvest.ripeKg) ? harvest.ripeKg : null;
+  const unripeKg = typeof harvest?.unripeKg === "number" && Number.isFinite(harvest.unripeKg) ? harvest.unripeKg : null;
+  const hasHarvest = ripeKg !== null && unripeKg !== null;
 
   useEffect(() => {
     // Push-generated keys never contain these chars; guard anyway so a
@@ -153,6 +159,8 @@ export default function BatchRecordSheet({ open, onOpenChange, report }: BatchRe
     ["Final Brix (achieved)", String(report?.targetBrixAchieved ?? "Unknown")],
     ["Avg Temp (°C)", String(report?.averageTemp ?? "Unknown")],
     ["Avg pH", String(report?.averagePh ?? "Unknown")],
+    ["Harvest Ripe (kg)", hasHarvest ? String(ripeKg) : "—"],
+    ["Harvest Unripe (kg)", hasHarvest ? String(unripeKg) : "—"],
   ];
   const safeName = String(report?.batchId ?? "batch").replace(/[^\w-]+/g, "-");
 
@@ -297,6 +305,16 @@ export default function BatchRecordSheet({ open, onOpenChange, report }: BatchRe
               ["Start Brix", String(report?.startingBrix ?? "—")],
               ["Target Brix", String(report?.targetBrix ?? "—")],
               ["Final Brix", String(report?.targetBrixAchieved ?? "—")],
+              // Three harvest cells, and only when present, so the 3-column grid
+              // stays a whole number of rows (9 cells → 3 rows; 12 → 4 rows).
+              // Records without harvest render exactly as before.
+              ...(hasHarvest
+                ? [
+                    ["Ripe (kg)", String(ripeKg)],
+                    ["Unripe (kg)", String(unripeKg)],
+                    ["Harvest total (kg)", String(Number(ripeKg) + Number(unripeKg))],
+                  ]
+                : []),
             ].map(([label, value]) => (
               <div key={label} className="rounded-xl border border-border bg-muted p-2">
                 <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">{label}</p>

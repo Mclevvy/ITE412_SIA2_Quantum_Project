@@ -14,25 +14,30 @@
  *
  * USAGE (PowerShell — plain `VAR=value` prefixes do NOT work here):
  *   node scripts\seedDemoBatch.mjs --dry-run
- *   node scripts\seedDemoBatch.mjs --check --email you@example.com --password secret
- *   node scripts\seedDemoBatch.mjs --confirm --email you@example.com --password secret
- *   # or set credentials first:
+ *   # Set credentials via env (preferred — a --password on the command line
+ *   # is written to your shell history for every local user to read):
  *   #   $env:SEED_EMAIL="you@example.com"; $env:SEED_PASSWORD="secret"
- *   #   node scripts\seedDemoBatch.mjs --confirm
+ *   node scripts\seedDemoBatch.mjs --check
+ *   node scripts\seedDemoBatch.mjs --confirm
+ *   node scripts\seedDemoBatch.mjs --harvest --batch "Batch #8208" --ripe 3.4 --unripe 1.4
+ *   node scripts\seedDemoBatch.mjs --harvest --batch "Batch #8208" --ripe 3.4 --unripe 1.4 --confirm
  *
- * MODES:
+ * MODES (choose one):
  *   --dry-run    preview only, no sign-in, writes nothing (default)
  *   --check      sign in and list what is actually in fermentation/history
  *   --confirm    write the 4 batches (needs credentials)
  *   --clean-junk list history records missing a batchId (needs credentials);
  *                add --confirm to actually delete them
+ *   --harvest   stamp { ripeKg, unripeKg } onto one existing history record,
+ *                matched by --batch; add --confirm to write. Re-runs overwrite
+ *                the two harvest numbers (the rest of the record is not touched).
  *
  * NOTE: these are synthetic batches for presentation purposes. Disclose that
  * to your panel — the data is realistic but generated, not measured.
  */
 import { initializeApp } from "firebase/app";
 import { getAuth, signInWithEmailAndPassword } from "firebase/auth";
-import { getDatabase, ref, push, set, get, remove } from "firebase/database";
+import { getDatabase, ref, push, set, get, update, remove } from "firebase/database";
 
 // Config comes only from env (loaded via `node --env-file-if-exists=.env`),
 // so a missing/incorrect .env fails loudly instead of hitting production.
@@ -165,7 +170,7 @@ function buildBatch(def, index, now) {
 }
 
 function parseArgs(argv) {
-  const args = { dryRun: true, confirm: false, check: false, clean: false, email: null, password: null };
+  const args = { dryRun: true, confirm: false, check: false, clean: false, harvest: false, batch: null, ripe: null, unripe: null, email: null, password: null };
   for (let i = 0; i < argv.length; i += 1) {
     if (argv[i] === "--confirm") {
       args.confirm = true;
@@ -181,8 +186,25 @@ function parseArgs(argv) {
       args.confirm = false;
     } else if (argv[i] === "--clean-junk") {
       args.clean = true;
-    } else if (argv[i] === "--email") args.email = argv[++i];
+    } else if (argv[i] === "--harvest") {
+      // Independent of --confirm/--dry-run: it never resets them, so
+      // `--harvest ... --confirm` leaves both flags true.
+      args.harvest = true;
+    } else if (argv[i] === "--batch") args.batch = argv[++i];
+    else if (argv[i] === "--ripe") args.ripe = argv[++i];
+    else if (argv[i] === "--unripe") args.unripe = argv[++i];
+    else if (argv[i] === "--email") args.email = argv[++i];
     else if (argv[i] === "--password") args.password = argv[++i];
+  }
+  // Reject ambiguous invocations instead of last-flag-wins: `--dry-run` with
+  // `--confirm` in either order must never silently perform a real write.
+  if (argv.includes("--dry-run") && argv.includes("--confirm")) {
+    console.error("Conflicting flags: --dry-run and --confirm. Pick one (dry-run is the default).");
+    process.exit(1);
+  }
+  if ([args.check, args.clean, args.harvest].filter(Boolean).length > 1) {
+    console.error("Conflicting modes: choose one of --check, --clean-junk, --harvest.");
+    process.exit(1);
   }
   args.email ??= process.env.SEED_EMAIL ?? null;
   args.password ??= process.env.SEED_PASSWORD ?? null;
@@ -199,9 +221,11 @@ async function signInDb(email, password) {
 async function readAllHistory(db) {
   const historyRef = ref(db, "fermentation/history");
   const snap = await get(historyRef);
-  console.log(`  [debug] read node: key=${snap.key} url=${snap.ref.toString()}`);
   if (!snap.exists()) return [];
-  return Object.entries(snap.val()).map(([key, b]) => ({ key, ...(b || {}) }));
+  // `key` LAST: a record must never be able to shadow its own RTDB key — a
+  // planted `key` field would otherwise redirect an update (or a --clean-junk
+  // delete) to the history root or a phantom path.
+  return Object.entries(snap.val()).map(([key, b]) => ({ ...(b || {}), key }));
 }
 
 async function main() {
@@ -265,6 +289,76 @@ async function main() {
       await remove(ref(db, `fermentation/history/${j.key}`));
       console.log(`  DELETED history/${j.key}.`);
     }
+    console.log("Done.");
+    return;
+  }
+
+  // Stamp weighed-harvest numbers onto ONE existing history record, matched by
+  // its batchId. `update` (not `set`) so the rest of the record survives.
+  if (args.harvest) {
+    const batchId = typeof args.batch === "string" ? args.batch.trim() : "";
+    const rawRipe = args.ripe == null ? "" : String(args.ripe).trim();
+    const rawUnripe = args.unripe == null ? "" : String(args.unripe).trim();
+    const ripeKg = Number(rawRipe);
+    const unripeKg = Number(rawUnripe);
+    if (!batchId) {
+      console.error('Missing --batch. Pass the batchId exactly as stored, e.g. --batch "Batch #8208".');
+      process.exitCode = 1;
+      return;
+    }
+    // Trim before Number(): Number("  ") is 0, which would otherwise write a
+    // fabricated 0 kg onto a real production record.
+    if (!rawRipe || !rawUnripe || !Number.isFinite(ripeKg) || !Number.isFinite(unripeKg) || ripeKg < 0 || unripeKg < 0) {
+      console.error(`Missing/invalid --ripe/--unripe. Both must be numbers >= 0 (got ripe=${args.ripe} unripe=${args.unripe}).`);
+      process.exitCode = 1;
+      return;
+    }
+    // Child paths, not a `harvest` object: update() then merges, so any sibling
+    // field under harvest survives.
+    const patch = { "harvest/ripeKg": ripeKg, "harvest/unripeKg": unripeKg };
+    if (args.dryRun || !args.confirm) {
+      console.log(`\nDRY RUN — nothing written. Would set on the record whose batchId === "${batchId}":`);
+      console.log(`  patch: ${JSON.stringify(patch)}  (only harvest/ripeKg + harvest/unripeKg)`);
+      console.log("  Re-run with --confirm (plus credentials) to write.");
+      return;
+    }
+    if (!args.email || !args.password) {
+      console.error("Missing credentials. Pass --email/--password (or set SEED_EMAIL/SEED_PASSWORD).");
+      process.exitCode = 1;
+      return;
+    }
+    const db = await signInDb(args.email, args.password);
+    const rows = await readAllHistory(db);
+    const matches = rows.filter((r) => r.batchId === batchId);
+    if (matches.length === 0) {
+      console.error(`No history record with batchId "${batchId}". Available:`);
+      for (const r of rows) console.log(`  ${r.batchId ?? "(no batchId)"} | key ${r.key}`);
+      process.exitCode = 1;
+      return;
+    }
+    if (matches.length > 1) {
+      console.error(`Ambiguous: ${matches.length} records share batchId "${batchId}" (keys: ${matches.map((m) => m.key).join(", ")}). Nothing written.`);
+      process.exitCode = 1;
+      return;
+    }
+    const key = matches[0].key;
+    try {
+      await update(ref(db, `fermentation/history/${key}`), patch);
+    } catch (e) {
+      console.error(`  FAILED harvest on fermentation/history/${key}: ${e?.code || e?.message || e}`);
+      process.exitCode = 1;
+      return;
+    }
+    const verify = (await get(ref(db, `fermentation/history/${key}`))).val();
+    const h = verify && verify.harvest;
+    // Assert batchId too: if the record vanished between read and write,
+    // update() recreates it as an orphan {harvest} node that would otherwise pass.
+    if (!verify || verify.batchId !== batchId || !h || h.ripeKg !== ripeKg || h.unripeKg !== unripeKg) {
+      console.error(`  VERIFY FAILED — fermentation/history/${key} = ${JSON.stringify(verify ?? null)}. Nothing else written.`);
+      process.exitCode = 1;
+      return;
+    }
+    console.log(`  WROTE fermentation/history/${key}.harvest = ${JSON.stringify(h)} (batchId "${batchId}").`);
     console.log("Done.");
     return;
   }

@@ -66,6 +66,8 @@ project settings — a build without them produces an app that fails at startup
 on purpose. Seed scripts (`npm run seed:demo` etc.) load the same `.env`
 automatically via `node --env-file-if-exists=.env` (Node >= 22.9).
 
+Backfill a batch's weighed harvest (rendered in the Batch Record sheet, and only there): `npm run seed:harvest -- --batch "Batch #8208" --ripe 3.4 --unripe 1.4` — dry-run by default, add `--confirm` to write. It stamps only `fermentation/history/{key}.harvest = { ripeKg, unripeKg }`; berry counts are deliberately not stored (they are `kg ÷ 0.45 / 0.30` and would drift).
+
 A simulator can render the UI, but native push registration requires a physical device and valid Firebase/APNs/FCM credentials. The web build continues to work without native notification permissions.
 
 ## Code layout
