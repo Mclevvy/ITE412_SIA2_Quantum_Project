@@ -1,86 +1,74 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { onValue, ref } from "firebase/database";
+import { db } from "../lib/firebase";
+import { isSorterConfigured, sorterDb } from "../lib/sorterFirebase";
+import { summarizeSorting, type SorterEntry } from "../lib/sortingStats";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Badge } from "./ui/badge";
-import { Switch } from "./ui/switch";
-import { Label } from "./ui/label";
-import { CheckCircle2Icon, XCircleIcon, ScanLineIcon, PaletteIcon } from "lucide-react";
+import { CheckCircle2Icon, LayersIcon, PaletteIcon, ScaleIcon, XCircleIcon } from "lucide-react";
 import { motion } from "motion/react";
 
-type FruitStatus = "qualified" | "unqualified";
-
-type SortedFruit = {
-  id: number;
-  color: string;
-  status: FruitStatus;
-  confidence: number;
+type BatchDetails = {
+  batchId?: string;
+  /** Snapshot of the sorting log position when the batch started.
+   *  Absent = not captured; { key: null } = log was empty; { key: "b5" } = slice after b5. */
+  sortingBaseline?: { key?: string | null };
 };
 
-type ColorStats = {
-  total: number;
-  qualified: number;
-  rejected: number;
-  confSum: number;
-};
-
-type ColorMap = Record<string, ColorStats>;
+function formatWeight(grams: number): string {
+  return grams >= 1000 ? `${(grams / 1000).toFixed(2)} kg` : `${grams.toFixed(1)} g`;
+}
 
 export default function FruitSorting() {
-  const [autoMode, setAutoMode] = useState(true);
+  const [batch, setBatch] = useState<BatchDetails | null>(null);
+  const [batchLoaded, setBatchLoaded] = useState(false);
+  const [entries, setEntries] = useState<Record<string, SorterEntry> | null>(null);
+  const [sorterError, setSorterError] = useState<string | null>(null);
 
-  // Sample results after color-based sorting/classification
-  const sortedFruits: SortedFruit[] = [
-    { id: 1, color: "Dark Red", status: "qualified", confidence: 95 },
-    { id: 2, color: "Purple", status: "qualified", confidence: 88 },
-    { id: 3, color: "Green", status: "unqualified", confidence: 92 },
-    { id: 4, color: "Dark Red", status: "qualified", confidence: 96 },
-    { id: 5, color: "Brown", status: "unqualified", confidence: 85 },
-    { id: 6, color: "Purple", status: "qualified", confidence: 90 },
-  ];
+  // Active batch: its id and the sorting baseline captured at Start Batch.
+  useEffect(() => {
+    return onValue(ref(db, "fermentation/currentBatch/details"), (snap) => {
+      setBatch(snap.exists() ? (snap.val() as BatchDetails) : null);
+      setBatchLoaded(true);
+    });
+  }, []);
 
-  const report = useMemo(() => {
-    const total = sortedFruits.length;
-    const qualified = sortedFruits.filter((f) => f.status === "qualified").length;
-    const rejected = total - qualified;
+  // The sorting machine's append-only log (separate project, read-only).
+  useEffect(() => {
+    if (!sorterDb) return;
+    return onValue(
+      ref(sorterDb, "bignay_sorter"),
+      (snap) => {
+        setEntries(snap.exists() ? (snap.val() as Record<string, SorterEntry>) : {});
+        setSorterError(null);
+      },
+      (err) => setSorterError(err.message)
+    );
+  }, []);
 
-    const byColor: ColorMap = sortedFruits.reduce<ColorMap>((acc, item) => {
-      const key = item.color?.trim() || "Unknown";
+  // A batch with no baseline field is "not captured"; a baseline with key null
+  // means the log was empty then, so every entry belongs to this batch.
+  const baselinePresent = batch?.sortingBaseline !== undefined;
+  const baselineKey = batch?.sortingBaseline?.key ?? null;
 
-      if (!acc[key]) {
-        acc[key] = { total: 0, qualified: 0, rejected: 0, confSum: 0 };
-      }
+  const summary = useMemo(
+    () => (entries !== null && baselinePresent ? summarizeSorting(entries, baselineKey) : null),
+    [entries, baselinePresent, baselineKey]
+  );
 
-      acc[key].total += 1;
-      if (item.status === "qualified") acc[key].qualified += 1;
-      else acc[key].rejected += 1;
-
-      acc[key].confSum += item.confidence ?? 0;
-
-      return acc;
-    }, {});
-
-    const colorRows = Object.entries(byColor)
-      .map(([color, v]) => {
-        const avgConfidence = v.total ? Math.round(v.confSum / v.total) : 0;
-        const passRate = v.total ? Math.round((v.qualified / v.total) * 100) : 0;
-
-        return {
-          color,
-          total: v.total,
-          qualified: v.qualified,
-          rejected: v.rejected,
-          avgConfidence,
-          passRate,
-        };
-      })
-      .sort((a, b) => b.total - a.total);
-
-    const avgConfidence =
-      total > 0
-        ? Math.round(sortedFruits.reduce((s, f) => s + (f.confidence ?? 0), 0) / total)
-        : 0;
-
-    return { total, qualified, rejected, colorRows, avgConfidence };
-  }, [sortedFruits]);
+  const blockedMessage = !batchLoaded
+    ? "Loading batch…"
+    : !batch
+      ? "No active batch — start one in the Tracker."
+      : !isSorterConfigured
+        ? "Sorter not configured. Add the VITE_SORTER_* keys to .env."
+        : sorterError
+          ? "Sorter unreachable — check the bignaysorter connection."
+          : !baselinePresent
+            ? "Baseline not captured for this batch (started while the sorter was offline)."
+            : entries !== null && summary === null
+              ? "Sorting log was reset — counts can't be attributed to this batch."
+              : null;
 
   return (
     <div className="p-4 space-y-4 pb-20 max-w-xl mx-auto">
@@ -88,158 +76,84 @@ export default function FruitSorting() {
       <div className="flex justify-between items-center">
         <div>
           <h1 className="text-foreground font-bold text-xl">Fruit Sorting</h1>
-          <p className="text-sm text-muted-foreground">Color-based quality classification report</p>
+          <p className="text-sm text-muted-foreground">
+            {batch?.batchId ? `${batch.batchId} · color-based classification` : "Color-based quality classification report"}
+          </p>
         </div>
         <PaletteIcon className="w-6 h-6 text-primary" />
       </div>
 
-      {/* Sample-data notice: these rows are placeholders, not live classifier output */}
-      <Card className="bg-amber-50 border-amber-200">
-        <CardContent className="p-3">
-          <p className="text-xs text-amber-800 font-medium">Sample data — no live classifier connected</p>
-        </CardContent>
-      </Card>
-
-      {/* Mode Toggle */}
-      <Card className="bg-secondary border-border">
-        <CardContent className="p-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <ScanLineIcon className="w-5 h-5 text-secondary-foreground" />
-              <div>
-                <Label htmlFor="auto-mode" className="cursor-pointer">
-                  Automatic Sorting Mode
-                </Label>
-                <p className="text-xs text-muted-foreground">Color-based classification enabled</p>
-              </div>
+      {blockedMessage ? (
+        <Card className="bg-muted border-dashed">
+          <CardContent className="p-6 text-center">
+            <p className="text-sm text-muted-foreground">{blockedMessage}</p>
+          </CardContent>
+        </Card>
+      ) : (
+        summary && (
+          <motion.div
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="space-y-4"
+          >
+            {/* Per-batch totals */}
+            <div className="grid grid-cols-3 gap-3">
+              <Card>
+                <CardContent className="p-3 text-center">
+                  <LayersIcon className="w-4 h-4 mx-auto text-muted-foreground mb-1" />
+                  <p className="text-foreground text-2xl font-bold tnum">{summary.total}</p>
+                  <p className="text-xs text-muted-foreground mt-1">Total</p>
+                </CardContent>
+              </Card>
+              <Card className="bg-emerald-50 border-emerald-200">
+                <CardContent className="p-3 text-center">
+                  <CheckCircle2Icon className="w-4 h-4 mx-auto text-emerald-600 mb-1" />
+                  <p className="text-emerald-700 text-2xl font-bold tnum">{summary.passed}</p>
+                  <p className="text-xs text-emerald-700 mt-1">Passed</p>
+                </CardContent>
+              </Card>
+              <Card className="bg-red-50 border-red-200">
+                <CardContent className="p-3 text-center">
+                  <XCircleIcon className="w-4 h-4 mx-auto text-red-600 mb-1" />
+                  <p className="text-[#B91C1C] text-2xl font-bold tnum">{summary.rejected}</p>
+                  <p className="text-xs text-[#B91C1C] mt-1">Rejected</p>
+                </CardContent>
+              </Card>
             </div>
-            <Switch
-              id="auto-mode"
-              checked={autoMode}
-              onCheckedChange={setAutoMode}
-            />
-          </div>
-          <p className="text-xs text-muted-foreground mt-2">
-            {autoMode ? "Auto mode is ON — generating report from classifications." : "Manual mode — report still available."}
-          </p>
-        </CardContent>
-      </Card>
 
-      {/* Summary Statistics */}
-      <div className="grid grid-cols-3 gap-3">
-        <Card>
-          <CardContent className="p-3 text-center">
-            <p className="text-foreground text-2xl font-bold tnum">{report.total}</p>
-            <p className="text-xs text-muted-foreground mt-1">Total</p>
-          </CardContent>
-        </Card>
-        <Card className="bg-emerald-50 border-emerald-200">
-          <CardContent className="p-3 text-center">
-            <p className="text-emerald-700 text-2xl font-bold tnum">{report.qualified}</p>
-            <p className="text-xs text-emerald-700 mt-1">Qualified</p>
-          </CardContent>
-        </Card>
-        <Card className="bg-red-50 border-red-200">
-          <CardContent className="p-3 text-center">
-            <p className="text-[#B91C1C] text-2xl font-bold tnum">{report.rejected}</p>
-            <p className="text-xs text-[#B91C1C] mt-1">Rejected</p>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Sorting Report */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-sm flex items-center gap-2">
-            <motion.div
-              animate={{ opacity: [1, 0.4, 1] }}
-              transition={{ duration: 1.6, repeat: Infinity }}
-              className="w-2 h-2 bg-primary rounded-full"
-            />
-            Sorting Report (By Color)
-          </CardTitle>
-        </CardHeader>
-
-        <CardContent className="space-y-2">
-          <div className="flex items-center justify-between text-sm">
-            <span className="text-muted-foreground">Average sample score</span>
-            <span className="text-foreground font-bold tnum">{report.avgConfidence}</span>
-          </div>
-
-          <div className="space-y-2">
-            {report.colorRows.map((row) => (
-              <div key={row.color} className="rounded-xl border border-border p-3">
+            {/* Estimated weight */}
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm flex items-center gap-2">
+                  <ScaleIcon className="w-4 h-4 text-primary" />
+                  Estimated Batch Weight
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-2">
                 <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <Badge variant="secondary" className="rounded-full text-xs">{row.color}</Badge>
-                    <span className="text-xs text-muted-foreground">
-                      Pass rate: {row.passRate}% • Avg score: {row.avgConfidence}
-                    </span>
-                  </div>
-                  <span className="text-xs text-muted-foreground">Total: {row.total}</span>
+                  <span className="text-sm text-muted-foreground">Estimated weight</span>
+                  <span className="text-foreground font-bold text-right tnum">
+                    {formatWeight(summary.estimatedWeightG)}
+                  </span>
                 </div>
-
-                <div className="grid grid-cols-2 gap-2 mt-3">
-                  <div className="rounded-xl bg-emerald-50 border border-emerald-200 p-2 text-center">
-                    <p className="text-emerald-700 text-sm font-bold tnum">{row.qualified}</p>
-                    <p className="text-xs text-emerald-700">Qualified</p>
-                  </div>
-                  <div className="rounded-xl bg-red-50 border border-red-200 p-2 text-center">
-                    <p className="text-[#B91C1C] text-sm font-bold tnum">{row.rejected}</p>
-                    <p className="text-xs text-[#B91C1C]">Rejected</p>
-                  </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-muted-foreground">Pass rate</span>
+                  <Badge variant="outline" className="bg-secondary text-secondary-foreground border-border">
+                    {summary.total ? Math.round((summary.passed / summary.total) * 100) : 0}%
+                  </Badge>
                 </div>
-              </div>
-            ))}
-          </div>
-        </CardContent>
-      </Card>
+                <p className="text-xs text-muted-foreground pt-2 border-t border-border mt-2">
+                  Weight = passed × 0.45 g (ripe) + rejected × 0.30 g (unripe). Tune in `sortingStats.ts`.
+                </p>
+              </CardContent>
+            </Card>
+          </motion.div>
+        )
+      )}
 
-      {/* Recent Classifications */}
-      <div>
-        <h2 className="text-foreground font-bold mb-3">Recent Classifications</h2>
-        <div className="space-y-2">
-          {sortedFruits
-            .slice()
-            .reverse()
-            .slice(0, 8)
-            .map((fruit, idx) => (
-              <motion.div
-                key={fruit.id}
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: idx * 0.05 }}
-              >
-                <Card className={fruit.status === "qualified" ? "border-emerald-200" : "border-red-200"}>
-                  <CardContent className="p-3">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        {fruit.status === "qualified" ? (
-                          <CheckCircle2Icon className="w-5 h-5 text-emerald-600" />
-                        ) : (
-                          <XCircleIcon className="w-5 h-5 text-red-600" />
-                        )}
-                        <div>
-                          <p className="text-sm text-foreground font-medium">Fruit #{fruit.id}</p>
-                          <p className="text-xs text-muted-foreground">Detected Color: {fruit.color}</p>
-                        </div>
-                      </div>
-
-                      <div className="text-right">
-                        <Badge
-                          variant="outline"
-                          className={fruit.status === "qualified" ? "bg-emerald-50 text-emerald-700 border-emerald-200 rounded-full text-xs" : "bg-red-50 text-[#B91C1C] border-red-200 rounded-full text-xs"}
-                        >
-                          {fruit.status === "qualified" ? "Qualified" : "Rejected"}
-                        </Badge>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              </motion.div>
-            ))}
-        </div>
-      </div>
+      <p className="text-xs text-muted-foreground text-center">
+        Live from the sorting machine · this batch only
+      </p>
     </div>
   );
 }

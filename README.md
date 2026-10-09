@@ -93,3 +93,13 @@ A simulator can render the UI, but native push registration requires a physical 
 - End-of-batch accuracy (`aiAccuracy` on `fermentation/history/{key}`) is now surfaced in Batch Reports: days error, ABV error, and quality-match (graded against the declared target ±0.5 °Bx, not a dry-wine band).
 - **TF.js import surface:** the two model screens (`PredictiveInsights.tsx`, `FermentationTracker.tsx`) import `@tensorflow/tfjs-core` + `@tensorflow/tfjs-layers` + the webgl/cpu backends directly, **not** the `@tensorflow/tfjs` umbrella — the umbrella also pulls `tfjs-converter` + `tfjs-data`. The four subpackages are declared in `package.json` (drop back to the umbrella only if you need conversion/IO helpers). Measured: the shared tfjs chunk went 1,591 → 1,449 kB raw, ~250 → 244 kB gzip — the kernels compress ~26:1, so the win is parse time, not download.
 - **Quality/Spoilage-Risk gating:** those two are the only outputs that need the net, so they're computed whenever the model is loaded and temp/pH/Brix are present — independently of the "Ready Now" days short-circuit and the ≥target check. When a card has no number it now names the blocker (`Loading model…` / `Waiting for a Brix reading` / `Model unavailable`) instead of a `Calculating…` that never resolved.
+
+## Fruit sorting (separate `bignaysorter` project)
+
+The Fruit Sorting page reads a **different** Firebase project, read-only — configured via `VITE_SORTER_*` (see `.env.example`). `src/lib/sorterFirebase.ts` is deliberately tolerant: an absent sorter config degrades this one page, it never crashes the app.
+
+- Data: `bignay_sorter/{key} = { value: "pass" | "reject" }`, an append-only log; `sorter/totalCount` is ignored (derivable, and can drift).
+- Per-batch counts are a **delta**: `startBatch` snapshots the log's last key into `fermentation/currentBatch/details.sortingBaseline` (`{ key: null }` = log was empty; the field absent = not captured, shown as such rather than guessed).
+- `src/lib/sortingStats.ts` (`summarizeSorting`) is pure and checked by `npm run check:sorting`; ordering handles `b1…b10` via the numeric suffix.
+- Estimated weight assumes **0.45 g per passed (ripe)** and **0.30 g per rejected (unripe)** berry — edit the constants in `sortingStats.ts`.
+- Assumes the log is append-only and never cleared; if it is cleared, the batch collapses to "counts can't be attributed" rather than a wrong number.
