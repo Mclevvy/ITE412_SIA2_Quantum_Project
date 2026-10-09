@@ -2,6 +2,8 @@ import { useEffect, useState, useRef } from "react";
 import { ref, onValue, get, update, push, serverTimestamp } from "firebase/database";
 import { db } from "../lib/firebase";
 import { writeErrorMessage } from "../lib/rtdbError";
+import { sorterDb } from "../lib/sorterFirebase";
+import { sortedKeys, latestEntryKey, type SorterEntry } from "../lib/sortingStats";
 
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Badge } from "./ui/badge";
@@ -17,6 +19,7 @@ import {
   DropletIcon,
   FlaskConicalIcon,
   RefreshCwIcon,
+  ScanLineIcon,
   SettingsIcon,
   ActivityIcon,
   XIcon,
@@ -36,6 +39,7 @@ interface Device {
   value?: string;
   enabled: boolean;
   controlKey?: string;
+  readOnly?: boolean;
 }
 
 const DEVICE_PORTAL_BASE = "http://192.168.4.1";
@@ -306,6 +310,18 @@ export default function DeviceControl() {
       value: "N/A",
       enabled: false,
     },
+    {
+      id: "6",
+      name: "Fruit Sorting Machine",
+      type: "sorter",
+      status: "offline",
+      icon: ScanLineIcon,
+      lastUpdate: "Checking sorter…",
+      value: "—",
+      enabled: true,
+      readOnly: true,
+      // no controlKey: keeps it out of the sugarMonitor hardware count + notifications
+    },
   ]);
 
   const [wifiModalOpen, setWifiModalOpen] = useState(false);
@@ -464,6 +480,53 @@ export default function DeviceControl() {
       );
     });
 
+    const unsubSorter = sorterDb
+      ? onValue(
+          ref(sorterDb, "bignay_sorter"),
+          (snapshot) => {
+            const entries = (snapshot.val() ?? {}) as Record<string, SorterEntry>;
+            if (Object.keys(entries).length === 0) {
+              setDevices((prev) =>
+                prev.map((device) =>
+                  device.readOnly === true
+                    ? { ...device, status: "online", value: "No fruits sorted yet", lastUpdate: "Connected" }
+                    : device
+                )
+              );
+            } else {
+              const key = latestEntryKey(entries);
+              const count = sortedKeys(entries).length;
+              setDevices((prev) =>
+                prev.map((device) =>
+                  device.readOnly === true
+                    ? { ...device, status: "online", value: `${count} fruits sorted • last ${key}`, lastUpdate: "Connected" }
+                    : device
+                )
+              );
+            }
+          },
+          () => {
+            setDevices((prev) =>
+              prev.map((device) =>
+                device.readOnly === true
+                  ? { ...device, status: "offline", value: "Unavailable", lastUpdate: "Sorter unreachable" }
+                  : device
+              )
+            );
+          }
+        )
+      : undefined;
+
+    if (!sorterDb) {
+      setDevices((prev) =>
+        prev.map((device) =>
+          device.readOnly === true
+            ? { ...device, status: "offline", value: "Not configured", lastUpdate: "Sorter unavailable" }
+            : device
+        )
+      );
+    }
+
     const interval = setInterval(() => {
       const eff = effectiveStatus();
       // Also check periodically in case the database value hasn't changed but the local time has passed the timeout
@@ -482,13 +545,14 @@ export default function DeviceControl() {
       unsubStatus();
       unsubCurrent();
       unsubSugar();
+      unsubSorter?.();
       clearInterval(interval);
     };
   }, []);
 
   const toggleDevice = async (id: string) => {
     const currentDevice = devices.find((d) => d.id === id);
-    if (!currentDevice || currentDevice.status === "offline") return;
+    if (!currentDevice || currentDevice.readOnly || currentDevice.status === "offline") return;
 
     if (currentDevice.controlKey !== "sugarMonitor") {
       alert("This device isn't connected to ESP32 hardware control. (Sugar Test is logged manually from the Dashboard.)");
@@ -712,7 +776,7 @@ export default function DeviceControl() {
                             </Badge>
                           )}
 
-                          {device.status !== "manual" && (device.enabled ? (
+                          {device.status !== "manual" && !device.readOnly && (device.enabled ? (
                             <Badge variant="outline" className="rounded-full text-xs">
                               Enabled
                             </Badge>
@@ -731,7 +795,7 @@ export default function DeviceControl() {
                         </p>
                       </div>
 
-                      {device.status !== "manual" && (
+                      {!device.readOnly && device.status !== "manual" && (
                         <Switch
                           checked={device.enabled}
                           onCheckedChange={() => toggleDevice(device.id)}
