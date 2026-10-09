@@ -509,9 +509,9 @@ async function main() {
     } catch (e) {
       console.error(
         `  FAILED ${b.def.batchId}: ${e?.code || e?.message || e}\n` +
-          `  If this is PERMISSION_DENIED, your database rules lack a sensorArchive stanza.\n` +
-          `  Add this next to your fermentation/sensors rules and retry:\n` +
-          `    "sensorArchive": { ".read": true, ".write": true },`
+          `  If this is PERMISSION_DENIED, the signed-in account is not allowed to\n` +
+          `  write fermentation/ (see the operator email in database.rules.json).\n` +
+          `  Set SEED_EMAIL to that account and retry.`
       );
       process.exitCode = 1;
       return;

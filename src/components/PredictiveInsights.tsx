@@ -499,7 +499,7 @@ export default function PredictiveInsights() {
         <CardHeader className="pb-2"><CardTitle className="text-sm">Model Specifications</CardTitle></CardHeader>
         <CardContent className="space-y-2">
           <div className="flex justify-between text-xs"><span className="text-muted-foreground">Architecture</span><span className="text-foreground font-medium">Multi-Output Dense Network</span></div>
-          <div className="flex justify-between text-xs"><span className="text-muted-foreground">Training Data</span><span className="text-foreground font-medium">50,000 synthetic batches</span></div>
+          <div className="flex justify-between text-xs"><span className="text-muted-foreground">Training Data</span><span className="text-foreground font-medium">Synthetic (count unverified)</span></div>
           <div className="flex justify-between text-xs"><span className="text-muted-foreground">Processor</span><span className="text-emerald-700 font-bold">TensorFlow.js (Edge AI)</span></div>
           <div className="flex justify-between text-xs pt-2 border-t border-border mt-2"><span className="text-muted-foreground">ABV Model</span><span className="text-foreground font-medium">Ridge Regression (Edge)</span></div>
           <div className="flex justify-between text-xs"><span className="text-muted-foreground">ABV Training Batches</span><span className="text-foreground font-medium">{abvModelInfo.nTrainingSamples} (synthetic)</span></div>

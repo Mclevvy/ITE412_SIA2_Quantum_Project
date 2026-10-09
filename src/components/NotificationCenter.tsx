@@ -22,6 +22,26 @@ const ONE_DAY_MS = 24 * 60 * 60 * 1000;
 // app downloads an ever-growing list on every open.
 const NOTIFICATION_READ_LIMIT = 50;
 
+// Single source of truth for raw node -> list shape, shared by the live
+// listener and the clear-all rollback. A failed delete must re-read the server
+// rather than paint back a snapshot, or it resurrects rows already removed.
+function mapNotifications(
+  data: Record<string, Omit<AppNotification, 'id'>> | null,
+  cutoff: number,
+): AppNotification[] {
+  if (!data) return [];
+  return Object.keys(data)
+    .map((key) => {
+      const entry = data[key];
+      // A locally written serverTimestamp() can still be pending, so fall back
+      // to "now" instead of dropping the newest notification.
+      const timestamp = typeof entry.timestamp === 'number' ? entry.timestamp : Date.now();
+      return { id: key, ...entry, timestamp };
+    })
+    .filter((notif) => notif.timestamp > cutoff)
+    .sort((a, b) => b.timestamp - a.timestamp);
+}
+
 const iconMap: Record<string, any> = {
   ThermometerIcon,
   CheckCircle2Icon,
@@ -45,6 +65,10 @@ export default function NotificationCenter() {
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [activeFilter, setActiveFilter] = useState('all');
   const [dbReady, setDbReady] = useState(false);
+  // Every write below is optimistic, so a rejected one has to be rolled back —
+  // otherwise the list shows a change that never reached Firebase.
+  const [isClearing, setIsClearing] = useState(false);
+  const [writeError, setWriteError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!db) {
@@ -65,23 +89,7 @@ export default function NotificationCenter() {
     const cutoffTimestamp = Date.now() - ONE_DAY_MS;
 
     const unsubscribe = onValue(notificationsQuery, (snapshot) => {
-      const data = snapshot.val();
-      if (data) {
-        const formattedData: AppNotification[] = Object.keys(data)
-          .map(key => {
-            const entry = data[key];
-            // A locally written serverTimestamp() can still be pending, so
-            // fall back to "now" instead of dropping the newest notification.
-            const timestamp = typeof entry.timestamp === 'number' ? entry.timestamp : Date.now();
-            return { id: key, ...entry, timestamp };
-          })
-          .filter(notif => notif.timestamp > cutoffTimestamp)
-          .sort((a, b) => b.timestamp - a.timestamp);
-
-        setNotifications(formattedData);
-      } else {
-        setNotifications([]);
-      }
+      setNotifications(mapNotifications(snapshot.val(), cutoffTimestamp));
     });
 
     return () => unsubscribe();
@@ -95,43 +103,82 @@ export default function NotificationCenter() {
 
   // Action to mark a single notification as read
   const handleMarkAsRead = async (id: string) => {
+    const target = notifications.find(n => n.id === id);
+    // Already-read rows have nothing to write — skip the round trip.
+    if (!db || !target || !target.unread) return;
     setNotifications(prev => prev.map(notif => notif.id === id ? { ...notif, unread: false } : notif));
-    if (db) await set(ref(db, `notifications/${id}/unread`), false);
+    try {
+      await set(ref(db, `notifications/${id}/unread`), false);
+      setWriteError(null);
+    } catch (error) {
+      console.error('Failed to mark notification as read:', error);
+      setNotifications(prev => prev.map(notif => notif.id === id ? target : notif));
+      setWriteError("Couldn't mark that as read — check your connection.");
+    }
   };
 
   // ✅ ACTION: Delete a single notification (Triggered by Swipe)
   const handleDelete = async (id: string) => {
+    const target = notifications.find(n => n.id === id);
+    if (!db || !target) return;
     // Optimistic UI update
     setNotifications(prev => prev.filter(notif => notif.id !== id));
     // Delete from Firebase
-    if (db) await remove(ref(db, `notifications/${id}`));
+    try {
+      await remove(ref(db, `notifications/${id}`));
+      setWriteError(null);
+    } catch (error) {
+      console.error('Failed to delete notification:', error);
+      setNotifications(prev => [...prev, target].sort((a, b) => b.timestamp - a.timestamp));
+      setWriteError("Couldn't delete that notification — check your connection.");
+    }
   };
 
   // ✅ ACTION: Clear ALL Notifications
   // Also prunes entries older than 24h: they are already hidden by the list
   // filter above, so without this the node would only ever grow.
   const handleClearAll = async () => {
-    if (!db) return;
+    if (!db || isClearing) return;
 
     const idsToDelete = filteredNotifications.map(n => n.id);
     const cutoff = Date.now() - ONE_DAY_MS;
 
-    const snap = await get(ref(db, 'notifications'));
-    const stored = snap.exists() ? (snap.val() as Record<string, { timestamp?: number }>) : {};
-    const staleIds = Object.keys(stored).filter(id => {
-      const ts = stored[id]?.timestamp;
-      return typeof ts !== 'number' || ts <= cutoff;
-    });
+    setIsClearing(true);
+    try {
+      const snap = await get(ref(db, 'notifications'));
+      const stored = snap.exists() ? (snap.val() as Record<string, { timestamp?: number }>) : {};
+      const staleIds = Object.keys(stored).filter(id => {
+        const raw = stored[id]?.timestamp;
+        // Mirror the display mapper: a pending serverTimestamp() is "now", not
+        // stale — otherwise a just-created notification is deleted as old.
+        const ts = typeof raw === 'number' ? raw : Date.now();
+        return ts <= cutoff;
+      });
 
-    const allIds = Array.from(new Set([...idsToDelete, ...staleIds]));
+      const allIds = Array.from(new Set([...idsToDelete, ...staleIds]));
 
-    // Optimistic UI Update
-    setNotifications(prev => prev.filter(n => !allIds.includes(n.id)));
+      // Optimistic UI Update
+      setNotifications(prev => prev.filter(n => !allIds.includes(n.id)));
 
-    // Background Firebase Delete
-    allIds.forEach(async (id) => {
-       await remove(ref(db, `notifications/${id}`));
-    });
+      // Awaited (not forEach'd): the deletes must settle before the flag clears,
+      // and a rejected one has to be caught rather than becoming an unhandled
+      // rejection that never restores the list.
+      await Promise.all(allIds.map(id => remove(ref(db, `notifications/${id}`))));
+      setWriteError(null);
+    } catch (error) {
+      console.error('Failed to clear notifications:', error);
+      // Re-read instead of restoring the snapshot: Promise.all may have already
+      // removed some rows, and the old list would show deleted notifications.
+      try {
+        const snap = await get(ref(db, 'notifications'));
+        setNotifications(mapNotifications(snap.val(), Date.now() - ONE_DAY_MS));
+      } catch {
+        // Listener reconciles on the next change; keep the optimistic list.
+      }
+      setWriteError("Couldn't clear notifications — check your connection.");
+    } finally {
+      setIsClearing(false);
+    }
   };
 
   const formatTimeAgo = (timestamp: number) => {
@@ -175,15 +222,19 @@ export default function NotificationCenter() {
           </div>
           {/* ✅ CLEAR ALL BUTTON */}
           {filteredNotifications.length > 0 && (
-            <button 
+            <button
+              type="button"
               onClick={handleClearAll}
-              className="min-h-[44px] min-w-[44px] px-2 py-1 text-xs font-medium text-destructive bg-red-50 hover:bg-red-100 rounded-full transition-colors flex items-center gap-1"
+              disabled={isClearing}
+              className="min-h-[44px] min-w-[44px] px-2 py-1 text-xs font-medium text-destructive bg-red-50 hover:bg-red-100 rounded-full transition-colors flex items-center gap-1 disabled:opacity-50"
             >
               <Trash2Icon aria-hidden="true" className="w-3 h-3" /> Clear All
             </button>
           )}
         </div>
       </div>
+
+      {writeError && <p role="alert" className="text-sm text-destructive">{writeError}</p>}
 
       {/* Filter Badges */}
       <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide" role="group" aria-label="Filter notifications">

@@ -8,7 +8,7 @@
     },
     "fermentation": {
       ".read": "auth != null",
-      ".write": "auth != null"
+      ".write": "auth != null && auth.token.email === 'jan.selvister13@gmail.com'"
     },
     "sensorArchive": {
       ".read": "auth != null",
@@ -20,7 +20,7 @@
     },
     "deviceControl": {
       ".read": "auth != null",
-      ".write": "auth != null"
+      ".write": "auth != null && auth.token.email === 'jan.selvister13@gmail.com'"
     },
     "deviceStatus": {
       ".read": "auth != null",

@@ -778,17 +778,17 @@ export default function DeviceControl() {
           </div>
           <div className="flex justify-between text-sm">
             <span className="text-muted-foreground">Data Accuracy</span>
-            <span className="text-emerald-700">
-              {systemActive ? "98.5%" : "Unavailable"}
+            <span className="text-muted-foreground">
+              Not measured
             </span>
           </div>
           <div className="flex justify-between text-sm">
             <span className="text-muted-foreground">Last Calibration</span>
-            <span className="text-foreground">Oct 15, 2025</span>
+            <span className="text-foreground">Not recorded</span>
           </div>
           <div className="flex justify-between text-sm">
             <span className="text-muted-foreground">Next Maintenance</span>
-            <span className="text-amber-700">In 12 days</span>
+            <span className="text-amber-700">Not scheduled</span>
           </div>
         </CardContent>
       </Card>

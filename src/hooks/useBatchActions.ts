@@ -16,6 +16,11 @@ export function useBatchActions(live: DashboardLive) {
   const [isStopModalOpen, setIsStopModalOpen] = useState<boolean>(false);
   const [isEndingBatch, setIsEndingBatch] = useState<boolean>(false);
 
+  // Shared in-flight guard for the measurement-log writes below (sugar test,
+  // OG correction, hydrometer check): a double-tap could push two history
+  // records, and a rejected write used to close the modal as if it had saved.
+  const [isSaving, setIsSaving] = useState<boolean>(false);
+
   const [isStartModalOpen, setIsStartModalOpen] = useState<boolean>(false);
   const [newBatch, setNewBatch] = useState({ volume: '', fruits: '', targetBrix: '2.0', initialBrix: '' });
 
@@ -106,6 +111,7 @@ export function useBatchActions(live: DashboardLive) {
     }
 
     setIsStopModalOpen(false);
+    setIsEndingBatch(false);
   };
 
   // Manual sugar (Brix) test entry — the owner/operator measures Brix by hand
@@ -117,7 +123,7 @@ export function useBatchActions(live: DashboardLive) {
   // corrected (hydrometer) values apart from inflated refractometer ones.
   const handleLogSugarTest = async (e: any) => {
     e.preventDefault();
-    if (!db) return;
+    if (!db || isSaving) return;
 
     const brix = Number(sugarInput);
     if (!Number.isFinite(brix) || brix < 0) return;
@@ -125,28 +131,36 @@ export function useBatchActions(live: DashboardLive) {
     const now = live.getServerNow();
     const sugarCurrentRef = ref(db, 'sensors/sugar/current');
 
-    // Archive the previous reading (if any) before overwriting it — but never
-    // a soft-sensor estimate, which is model output, not a measurement.
-    const prevSnap = await get(sugarCurrentRef);
-    const prev = prevSnap.exists() ? prevSnap.val() : null;
-    if (
-      prev &&
-      typeof prev.time === 'number' &&
-      typeof prev.brix === 'number' &&
-      prev.source !== 'predicted'
-    ) {
-      await push(ref(db, 'sensors/sugar/history'), {
-        brix: Number(prev.brix),
-        time: Number(prev.time),
-        ...(typeof prev.instrument === 'string' ? { instrument: prev.instrument } : {}),
-      });
+    setIsSaving(true);
+    try {
+      // Archive the previous reading (if any) before overwriting it — but never
+      // a soft-sensor estimate, which is model output, not a measurement.
+      const prevSnap = await get(sugarCurrentRef);
+      const prev = prevSnap.exists() ? prevSnap.val() : null;
+      if (
+        prev &&
+        typeof prev.time === 'number' &&
+        typeof prev.brix === 'number' &&
+        prev.source !== 'predicted'
+      ) {
+        await push(ref(db, 'sensors/sugar/history'), {
+          brix: Number(prev.brix),
+          time: Number(prev.time),
+          ...(typeof prev.instrument === 'string' ? { instrument: prev.instrument } : {}),
+        });
+      }
+
+      await set(sugarCurrentRef, { brix, time: now, source: 'manual', instrument: sugarInstrument });
+
+      live.markSugarTestLogged();
+      setIsSugarModalOpen(false);
+      setSugarInput('');
+    } catch (error) {
+      console.error('Failed to log sugar test:', error);
+      window.alert('Could not log this Brix reading — the previous reading is unchanged. Check your connection and try again.');
+    } finally {
+      setIsSaving(false);
     }
-
-    await set(sugarCurrentRef, { brix, time: now, source: 'manual', instrument: sugarInstrument });
-
-    live.markSugarTestLogged();
-    setIsSugarModalOpen(false);
-    setSugarInput('');
   };
 
   // Correct the active batch's Starting Brix (OG). Written straight into
@@ -154,33 +168,49 @@ export function useBatchActions(live: DashboardLive) {
   // calculation as soon as a valid OG exists.
   const handleSaveOg = async (e: any) => {
     e.preventDefault();
-    if (!db) return;
+    if (!db || isSaving) return;
     const og = Number(ogInput);
     if (!Number.isFinite(og) || og <= 0 || og > 60) return;
-    await update(ref(db, 'fermentation/currentBatch/details'), { initialBrix: og });
-    setIsOgEditing(false);
-    setOgInput('');
+    setIsSaving(true);
+    try {
+      await update(ref(db, 'fermentation/currentBatch/details'), { initialBrix: og });
+      setIsOgEditing(false);
+      setOgInput('');
+    } catch (error) {
+      console.error('Failed to save OG correction:', error);
+      window.alert('Could not save the corrected Starting Brix — nothing was changed. Check your connection and try again.');
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   // Append one hydrometer-vs-app comparison. Purely additive — batch details,
   // sensors, and history are untouched, so this is safe on a live batch.
   const handleSaveHydroCheck = async (e: any) => {
     e.preventDefault();
-    if (!db) return;
+    if (!db || isSaving) return;
     const habv = Number(hydroAbvInput);
     if (!Number.isFinite(habv) || habv < 0 || habv > 60) return;
-    await push(ref(db, 'fermentation/currentBatch/hydrometerChecks'), {
-      checkedAt: live.getServerNow(),
-      hydrometerAbv: habv,
-      checkType: hydroCheckType,
-      modelAbv: live.estimatedAbv !== null ? live.estimatedAbv.value : null,
-      basis: live.estimatedAbv !== null ? live.estimatedAbv.basis : 'none',
-      ogBrix: live.ogBrixForCheck,
-      currentBrix: live.brixNow,
-      factor: getBrixToAbvFactor(),
-    });
-    setIsHydroModalOpen(false);
-    setHydroAbvInput('');
+    setIsSaving(true);
+    try {
+      await push(ref(db, 'fermentation/currentBatch/hydrometerChecks'), {
+        checkedAt: live.getServerNow(),
+        hydrometerAbv: habv,
+        checkType: hydroCheckType,
+        modelAbv: live.estimatedAbv !== null ? live.estimatedAbv.value : null,
+        basis: live.estimatedAbv !== null ? live.estimatedAbv.basis : 'none',
+        ogBrix: live.ogBrixForCheck,
+        currentBrix: live.brixNow,
+        factor: getBrixToAbvFactor(),
+      });
+      setIsHydroModalOpen(false);
+      setHydroAbvInput('');
+    } catch (error) {
+      console.error('Failed to save hydrometer check:', error);
+      window.alert('Could not save this hydrometer check — nothing was recorded. Check your connection and try again.');
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   return {

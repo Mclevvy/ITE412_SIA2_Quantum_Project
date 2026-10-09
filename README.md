@@ -46,6 +46,20 @@ The `notification` fields are used by FCM/APNs for background delivery. The `dat
   Firmware must sign in with a device account before deploying — reopening a
   path is a consciously-accepted exception, not the default.
 
+### Database rules: operator-only writes
+
+- In [`database.rules.json`](database.rules.json), writes to `fermentation` and
+  `deviceControl` now require the operator's verified email:
+  `.write: auth != null && auth.token.email === 'jan.selvister13@gmail.com' && auth.token.email_verified === true`.
+  Reads are unchanged (`auth != null`).
+- Previously ANY signed-in user could write these nodes; only the operator account
+  can now.
+- To add a second operator, edit those two `.write` expressions to
+  `(auth.token.email === 'a@x.com' || auth.token.email === 'b@y.com')` and
+  re-deploy the rules.
+- The account in `SEED_EMAIL` (used by `npm run seed:*`) must be one of the
+  allowed emails, or the seeder fails with `PERMISSION_DENIED`.
+
 ### App Check (optional hardening)
 
 `src/lib/firebase.ts` initializes App Check **only** when `VITE_RECAPTCHA_SITE_KEY`

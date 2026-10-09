@@ -68,9 +68,22 @@ export default function ReportsAnalytics() {
   });
 
   // ✅ ACTION: Clear all old test data
+  const [isWiping, setIsWiping] = useState(false);
+  const [wipeError, setWipeError] = useState<string | null>(null);
+
   const handleWipeHistory = async () => {
-    if (window.confirm("Are you sure you want to permanently delete all historical batch reports? This is useful for clearing test data before your final defense.")) {
-      if (db) await set(ref(db, 'fermentation/history'), null);
+    if (!db || isWiping) return;
+    if (!window.confirm("Are you sure you want to permanently delete all historical batch reports? This is useful for clearing test data before your final defense.")) return;
+
+    setIsWiping(true);
+    setWipeError(null);
+    try {
+      await set(ref(db, 'fermentation/history'), null);
+    } catch (error) {
+      console.error("Failed to wipe history:", error);
+      setWipeError("Couldn't delete the history — nothing was changed. Check your connection and try again.");
+    } finally {
+      setIsWiping(false);
     }
   };
 
@@ -343,10 +356,11 @@ export default function ReportsAnalytics() {
             variant="outline"
             className="border-red-200 text-red-600 hover:bg-red-50"
             onClick={handleWipeHistory}
-            disabled={historicalData.length === 0}
+            disabled={historicalData.length === 0 || isWiping}
+            aria-label="Delete all historical batch reports"
             title="Clear all historical data"
           >
-            <Trash2Icon className="w-4 h-4" />
+            <Trash2Icon aria-hidden="true" className="w-4 h-4" />
           </Button>
 
           <div className="relative">
@@ -375,6 +389,8 @@ export default function ReportsAnalytics() {
           </div>
         </div>
       </div>
+
+      {wipeError && <p role="alert" className="text-sm text-destructive">{wipeError}</p>}
 
       {/* ✅ UPDATED METRIC CARDS (Now 4 Columns to include Fruits Used) */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
