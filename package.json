@@ -54,6 +54,7 @@
             "preview": "vite preview",
             "typecheck": "tsc --noEmit",
             "check:curve": "node scripts/checkCurve.ts",
+            "check:sorting": "node scripts/checkSorting.ts",
             "train:abv": "node scripts/trainAbvModel.mjs",
             "seed:demo": "node --env-file-if-exists=.env scripts/seedDemoBatch.mjs --dry-run",
             "seed:check": "node --env-file-if-exists=.env scripts/seedDemoBatch.mjs --check",
