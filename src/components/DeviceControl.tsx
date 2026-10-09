@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef } from "react";
 import { ref, onValue, get, update, push, serverTimestamp } from "firebase/database";
 import { db } from "../lib/firebase";
+import { writeErrorMessage } from "../lib/rtdbError";
 
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Badge } from "./ui/badge";
@@ -522,7 +523,7 @@ export default function DeviceControl() {
         )
       );
 
-      alert("Failed to update device state in Firebase.");
+      alert(writeErrorMessage(error, "Failed to update device state in Firebase."));
     } finally {
       setLoadingId(null);
     }

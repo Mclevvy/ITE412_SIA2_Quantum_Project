@@ -30,6 +30,7 @@ import { endBatch, startBatch as startBatchWrite } from '../lib/batchWrites';
 import { resolveInitialBrix } from '../lib/abvModel';
 import { sugarCurve, daysToTarget } from '../lib/fermentationCurve';
 import { toFiniteNumber } from '../lib/num';
+import { writeErrorMessage } from '../lib/rtdbError';
 import OgCalculator from './OgCalculator';
 
 // 1. SCALING CONSTANTS (Matches Python Exactly)
@@ -217,7 +218,7 @@ export default function FermentationTracker() {
       });
     } catch (error) {
       console.error("Failed to start batch:", error);
-      window.alert("Could not start the batch. Check your connection and try again.");
+      window.alert(writeErrorMessage(error, "Could not start the batch. Check your connection and try again."));
       return;
     }
     setIsModalOpen(false);
@@ -237,7 +238,7 @@ export default function FermentationTracker() {
       await endBatch({ db, details, currentBrix, currentTemp, currentPh });
     } catch (error) {
       console.error("Failed to complete batch:", error);
-      window.alert("Could not archive this batch. It is still active — check your connection and try again.");
+      window.alert(writeErrorMessage(error, "Could not archive this batch. It is still active — check your connection and try again."));
       setIsCompleting(false);
     }
   };

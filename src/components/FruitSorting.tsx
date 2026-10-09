@@ -3,6 +3,7 @@ import { onValue, ref, update } from "firebase/database";
 import { db } from "../lib/firebase";
 import { sorterDb } from "../lib/sorterFirebase";
 import { summarizeSorting, countsFromKg, latestEntryKey, type SorterEntry } from "../lib/sortingStats";
+import { writeErrorMessage } from "../lib/rtdbError";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
@@ -149,8 +150,8 @@ export default function FruitSorting() {
         "details/harvest/unripeKg": unripe,
       });
       setFormOpen(false);
-    } catch {
-      setSaveError("Couldn't save — check your connection.");
+    } catch (error) {
+      setSaveError(writeErrorMessage(error, "Couldn't save — check your connection."));
     } finally {
       setSaving(false);
     }

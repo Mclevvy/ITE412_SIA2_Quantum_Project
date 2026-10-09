@@ -3,6 +3,7 @@ import { db } from "../lib/firebase";
 import { get, push, ref, set, update } from "firebase/database";
 import { endBatch, startBatch } from "../lib/batchWrites";
 import { getBrixToAbvFactor } from "../lib/abvModel";
+import { writeErrorMessage } from "../lib/rtdbError";
 import type { DashboardLive } from "./useDashboardLive";
 
 /**
@@ -20,6 +21,10 @@ export function useBatchActions(live: DashboardLive) {
   // OG correction, hydrometer check): a double-tap could push two history
   // records, and a rejected write used to close the modal as if it had saved.
   const [isSaving, setIsSaving] = useState<boolean>(false);
+
+  // Same in-flight guard for Start Batch: a double-tap could push two batch
+  // records and clear the sensor state twice.
+  const [isStarting, setIsStarting] = useState<boolean>(false);
 
   const [isStartModalOpen, setIsStartModalOpen] = useState<boolean>(false);
   const [newBatch, setNewBatch] = useState({ volume: '', fruits: '', targetBrix: '2.0', initialBrix: '' });
@@ -48,7 +53,7 @@ export function useBatchActions(live: DashboardLive) {
 
   const handleStartBatch = async (e: any) => {
     e.preventDefault();
-    if (!db) return;
+    if (!db || isStarting) return;
 
     // Validate BEFORE touching the database: Number('') is 0 and a cleared
     // form field yields NaN, which RTDB rejects — clearing the sensors first
@@ -60,6 +65,8 @@ export function useBatchActions(live: DashboardLive) {
       return;
     }
 
+    // After every validation return above: they must not latch the guard.
+    setIsStarting(true);
     try {
       // Shared writer (src/lib/batchWrites.ts): one atomic write records the
       // batch and clears the previous batch's sensor state, so a new batch
@@ -76,8 +83,10 @@ export function useBatchActions(live: DashboardLive) {
       live.resetLiveState();
     } catch (error) {
       console.error("Failed to start batch:", error);
-      window.alert("Could not start the batch. Nothing was changed — check your connection and try again.");
+      window.alert(writeErrorMessage(error, "Could not start the batch. Nothing was changed — check your connection and try again."));
       return;
+    } finally {
+      setIsStarting(false);
     }
 
     setIsStartModalOpen(false);
@@ -105,7 +114,7 @@ export function useBatchActions(live: DashboardLive) {
       });
     } catch (error) {
       console.error("Failed to end batch:", error);
-      window.alert("Could not archive this batch. It is still active — check your connection and try again.");
+      window.alert(writeErrorMessage(error, "Could not archive this batch. It is still active — check your connection and try again."));
       setIsEndingBatch(false);
       return;
     }
@@ -157,7 +166,7 @@ export function useBatchActions(live: DashboardLive) {
       setSugarInput('');
     } catch (error) {
       console.error('Failed to log sugar test:', error);
-      window.alert('Could not log this Brix reading — the previous reading is unchanged. Check your connection and try again.');
+      window.alert(writeErrorMessage(error, 'Could not log this Brix reading — the previous reading is unchanged. Check your connection and try again.'));
     } finally {
       setIsSaving(false);
     }
@@ -178,7 +187,7 @@ export function useBatchActions(live: DashboardLive) {
       setOgInput('');
     } catch (error) {
       console.error('Failed to save OG correction:', error);
-      window.alert('Could not save the corrected Starting Brix — nothing was changed. Check your connection and try again.');
+      window.alert(writeErrorMessage(error, 'Could not save the corrected Starting Brix — nothing was changed. Check your connection and try again.'));
     } finally {
       setIsSaving(false);
     }
@@ -207,7 +216,7 @@ export function useBatchActions(live: DashboardLive) {
       setHydroAbvInput('');
     } catch (error) {
       console.error('Failed to save hydrometer check:', error);
-      window.alert('Could not save this hydrometer check — nothing was recorded. Check your connection and try again.');
+      window.alert(writeErrorMessage(error, 'Could not save this hydrometer check — nothing was recorded. Check your connection and try again.'));
     } finally {
       setIsSaving(false);
     }

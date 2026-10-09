@@ -42,6 +42,7 @@ import { db } from "../lib/firebase";
 import { ref, set } from "firebase/database";
 import { useHistoryList } from "../hooks/useHistoryList";
 import { escapeHtml as esc, guardFormula as guard } from "../lib/exportGuards";
+import { writeErrorMessage } from "../lib/rtdbError";
 import BatchRecordSheet from "./BatchRecordSheet";
 
 type TabType = "weekly" | "monthly" | "seasonal";
@@ -81,7 +82,7 @@ export default function ReportsAnalytics() {
       await set(ref(db, 'fermentation/history'), null);
     } catch (error) {
       console.error("Failed to wipe history:", error);
-      setWipeError("Couldn't delete the history — nothing was changed. Check your connection and try again.");
+      setWipeError(writeErrorMessage(error, "Couldn't delete the history — nothing was changed. Check your connection and try again."));
     } finally {
       setIsWiping(false);
     }

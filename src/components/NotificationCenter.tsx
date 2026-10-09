@@ -16,6 +16,7 @@ import { motion, AnimatePresence } from 'motion/react'; // ✅ Imported Framer M
 
 import { db } from '../lib/firebase';
 import { get, limitToLast, onValue, query, ref, set, remove } from 'firebase/database';
+import { writeErrorMessage } from '../lib/rtdbError';
 
 const ONE_DAY_MS = 24 * 60 * 60 * 1000;
 // The node is never pruned by the writers, so cap every read: without this the
@@ -113,7 +114,7 @@ export default function NotificationCenter() {
     } catch (error) {
       console.error('Failed to mark notification as read:', error);
       setNotifications(prev => prev.map(notif => notif.id === id ? target : notif));
-      setWriteError("Couldn't mark that as read — check your connection.");
+      setWriteError(writeErrorMessage(error, "Couldn't mark that as read — check your connection."));
     }
   };
 
@@ -130,7 +131,7 @@ export default function NotificationCenter() {
     } catch (error) {
       console.error('Failed to delete notification:', error);
       setNotifications(prev => [...prev, target].sort((a, b) => b.timestamp - a.timestamp));
-      setWriteError("Couldn't delete that notification — check your connection.");
+      setWriteError(writeErrorMessage(error, "Couldn't delete that notification — check your connection."));
     }
   };
 
@@ -175,7 +176,7 @@ export default function NotificationCenter() {
       } catch {
         // Listener reconciles on the next change; keep the optimistic list.
       }
-      setWriteError("Couldn't clear notifications — check your connection.");
+      setWriteError(writeErrorMessage(error, "Couldn't clear notifications — check your connection."));
     } finally {
       setIsClearing(false);
     }
