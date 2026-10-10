@@ -150,7 +150,7 @@ const BottleFillingMonitor = () => {
   const history = fillerHistory.map((item) => ({
     key: String(item.id),
     batch: validBatchId(item.batchId) ?? "Unknown batch",
-    actual: validActualMl(item.actualVolumeMl),
+    target: validTargetMl(item.targetVolumeMl),
     status: validStatus(item.status),
   }));
 
@@ -425,7 +425,7 @@ const BottleFillingMonitor = () => {
                   className="py-4 flex items-center justify-between gap-3 text-sm"
                 >
                   <span className="font-medium text-foreground">
-                    {row.batch} · {row.actual != null ? `${row.actual.toFixed(1)} ml` : "— ml"}
+                    {row.batch} · {row.target != null ? `target ${row.target} ml` : "—"}
                   </span>
                   <span className="inline-flex items-center gap-1 text-muted-foreground font-semibold">
                     {row.status === "pass" ? (

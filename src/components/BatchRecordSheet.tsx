@@ -67,27 +67,11 @@ export default function BatchRecordSheet({ open, onOpenChange, report }: BatchRe
   const hasHarvest = ripeKg !== null && unripeKg !== null;
   const fillsEntries =
     report?.fills && typeof report.fills === "object" ? Object.values(report.fills) : [];
-  const isBottledMl = (v: unknown) => typeof v === "number" && Number.isFinite(v) && v >= 0;
-  const bottledMl = fillsEntries.reduce(
-    (sum: number, f: any) => (isBottledMl(f?.actualVolumeMl) ? sum + (f.actualVolumeMl as number) : sum),
-    0,
-  );
-  const hasBottled = fillsEntries.some((f: any) => isBottledMl(f?.actualVolumeMl));
   const fillerIds = [...new Set(
     fillsEntries.map((f: any) => f?.fillerBatchId).filter((v): v is string => typeof v === "string" && v.length > 0),
   )];
-  // "3L"-style estimate → ml (first integer × 1000); num.ts has no yield parser.
-  const estimateMl = (() => {
-    if (typeof report?.finalYield !== "string") return null;
-    const m = report.finalYield.match(/(\d+)/);
-    if (!m) return null;
-    const n = parseInt(m[1], 10);
-    return Number.isFinite(n) && n > 0 ? n * 1000 : null;
-  })();
-  const estimateLabel =
-    typeof report?.finalYield === "string" && report.finalYield.length > 0 ? report.finalYield : "—";
-  const bottledText = hasBottled
-    ? `Bottled ${bottledMl.toFixed(1)} ml of ${estimateLabel} estimated${estimateMl ? ` (${Math.round((bottledMl / estimateMl) * 100)}%)` : ""}${fillerIds.length ? ` · ${fillerIds.join(", ")}` : ""}`
+  const bottledText = fillsEntries.length
+    ? `Fills: ${fillsEntries.length} pour${fillsEntries.length === 1 ? "" : "s"}${fillerIds.length ? ` · ${fillerIds.join(", ")}` : ""}`
     : null;
 
   useEffect(() => {
