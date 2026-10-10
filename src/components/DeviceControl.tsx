@@ -3,6 +3,7 @@ import { ref, onValue, get, update, push, serverTimestamp } from "firebase/datab
 import { db } from "../lib/firebase";
 import { writeErrorMessage } from "../lib/rtdbError";
 import { sorterDb } from "../lib/sorterFirebase";
+import { fillerDb } from "../lib/fillerFirebase";
 import { sortedKeys, latestEntryKey, type SorterEntry } from "../lib/sortingStats";
 
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
@@ -24,6 +25,7 @@ import {
   ActivityIcon,
   XIcon,
   ExternalLinkIcon,
+  Wine,
   type LucideIcon,
 } from "lucide-react";
 import { motion } from "motion/react";
@@ -322,6 +324,17 @@ export default function DeviceControl() {
       readOnly: true,
       // no controlKey: keeps it out of the sugarMonitor hardware count + notifications
     },
+    {
+      id: "7",
+      name: "Wine Filling Machine",
+      type: "filler",
+      status: "offline",
+      icon: Wine,
+      lastUpdate: "Checking filler…",
+      value: "—",
+      enabled: true,
+      readOnly: true,
+    },
   ]);
 
   const [wifiModalOpen, setWifiModalOpen] = useState(false);
@@ -488,7 +501,7 @@ export default function DeviceControl() {
             if (Object.keys(entries).length === 0) {
               setDevices((prev) =>
                 prev.map((device) =>
-                  device.readOnly === true
+                  device.readOnly === true && device.type === "sorter"
                     ? { ...device, status: "online", value: "No fruits sorted yet", lastUpdate: "Connected" }
                     : device
                 )
@@ -498,7 +511,7 @@ export default function DeviceControl() {
               const count = sortedKeys(entries).length;
               setDevices((prev) =>
                 prev.map((device) =>
-                  device.readOnly === true
+                  device.readOnly === true && device.type === "sorter"
                     ? { ...device, status: "online", value: `${count} fruits sorted • last ${key}`, lastUpdate: "Connected" }
                     : device
                 )
@@ -508,7 +521,7 @@ export default function DeviceControl() {
           () => {
             setDevices((prev) =>
               prev.map((device) =>
-                device.readOnly === true
+                device.readOnly === true && device.type === "sorter"
                   ? { ...device, status: "offline", value: "Unavailable", lastUpdate: "Sorter unreachable" }
                   : device
               )
@@ -520,8 +533,74 @@ export default function DeviceControl() {
     if (!sorterDb) {
       setDevices((prev) =>
         prev.map((device) =>
-          device.readOnly === true
+          device.readOnly === true && device.type === "sorter"
             ? { ...device, status: "offline", value: "Not configured", lastUpdate: "Sorter unavailable" }
+            : device
+        )
+      );
+    }
+
+    const unsubFiller = fillerDb
+      ? onValue(
+          ref(fillerDb, "filling/currentBatch"),
+          (snapshot) => {
+            const data = snapshot.val();
+            if (!data || typeof data !== "object") {
+              setDevices((prev) =>
+                prev.map((device) =>
+                  device.readOnly === true && device.type === "filler"
+                    ? { ...device, status: "online", value: "Waiting for first fill", lastUpdate: "Connected" }
+                    : device
+                )
+              );
+              return;
+            }
+            const rawStage = data.stage;
+            const stage = typeof rawStage === "string" && rawStage.trim() !== "" ? rawStage : "";
+            const rawId = data.details?.batchId;
+            const batchId = typeof rawId === "string" && rawId.trim() !== "" ? rawId : undefined;
+            const id = batchId ?? "—";
+            let status: "online" | "offline" = "online";
+            let value = `Unknown status · ${id}`;
+            let lastUpdate = "Connected";
+            if (!stage) {
+              value = "Waiting for first fill";
+            } else if (stage === "dispensing" || stage === "filling") {
+              value = `Filling — ${id}`;
+            } else if (stage === "done") {
+              value = `Fill complete · ${id}`;
+            } else if (stage === "error") {
+              status = "offline";
+              value = `Fill error · ${id}`;
+              lastUpdate = "Filler reported an error";
+            } else if (stage === "idle") {
+              value = batchId ? `Idle · ${batchId}` : "Idle";
+            }
+            setDevices((prev) =>
+              prev.map((device) =>
+                device.readOnly === true && device.type === "filler"
+                  ? { ...device, status, value, lastUpdate }
+                  : device
+              )
+            );
+          },
+          () => {
+            setDevices((prev) =>
+              prev.map((device) =>
+                device.readOnly === true && device.type === "filler"
+                  ? { ...device, status: "offline", value: "Unavailable", lastUpdate: "Filler unreachable" }
+                  : device
+              )
+            );
+          }
+        )
+      : undefined;
+
+    if (!fillerDb) {
+      setDevices((prev) =>
+        prev.map((device) =>
+          device.readOnly === true && device.type === "filler"
+            ? { ...device, status: "offline", value: "Not configured", lastUpdate: "Filler unavailable" }
             : device
         )
       );
@@ -546,6 +625,7 @@ export default function DeviceControl() {
       unsubCurrent();
       unsubSugar();
       unsubSorter?.();
+      unsubFiller?.();
       clearInterval(interval);
     };
   }, []);

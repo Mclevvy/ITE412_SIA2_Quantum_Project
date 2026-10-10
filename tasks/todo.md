@@ -69,3 +69,6 @@ Per spec Addendum C: completed fill with an ACTIVE batch → `fermentation/sampl
 
 ## Task 9: sorter sample ranges (natasha, owns FruitSorting.tsx + sortingStats.ts only)
 Per spec Addendum D: "Ignore entries so far" button (confirm-gated) re-cuts baseline to latest key + pushes audit range to `fermentation/sorterSamples`; muted status line; harvest path untouched.
+
+## Task 10: filler row on Device Control (natasha, owns DeviceControl.tsx only)
+Append read-only "Wine Filling Machine" row (id 7, Wine icon, readOnly, no controlKey): subscribes `filling/currentBatch` on fillerDb; online=reachable with stage-aware copy (dispensing→Filling, done→complete, error→offline fault, idle→Idle); unconfigured/error fallbacks; hidden Switch via existing readOnly guards; header count + toggle + notifications untouched.
