@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { onValue, ref } from "firebase/database";
-import { db } from "../lib/firebase";
+import type { Database } from "firebase/database";
+import { db as primaryDb } from "../lib/firebase";
 
 interface HistoryListOptions {
   /** Exact ordering; each screen passes its current comparator unchanged. */
@@ -23,13 +24,20 @@ interface HistoryListOptions {
  * Subscribes to a push-keyed history node (`Object.keys(data).map(key =>
  * ({ id: key, ...data[key] }))`) — the fetch duplicated across
  * FermentationTracker, PredictiveInsights, ReportsAnalytics (all on
- * `fermentation/history`) and BottleFillingPage (on `reports/bottling`).
+ * `fermentation/history`) and BottleFillingPage (on `filling/history`).
  *
  * Returns the mapped list plus `isLoading` (false after the first snapshot,
  * or immediately when Firebase is unavailable) and `hiddenInvalidCount`
  * (entries dropped by `filter`; 0 when no filter is given).
+ *
+ * `db` defaults to the primary app's database; pass another `Database` (e.g.
+ * the read-only filler project) to list a history node from that project.
  */
-export function useHistoryList(path: string, options?: HistoryListOptions) {
+export function useHistoryList(
+  path: string,
+  options?: HistoryListOptions,
+  db: Database | null = primaryDb
+) {
   const [items, setItems] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [hiddenInvalidCount, setHiddenInvalidCount] = useState(0);
@@ -67,9 +75,9 @@ export function useHistoryList(path: string, options?: HistoryListOptions) {
     });
 
     return () => unsubscribe();
-    // Options are static literals per call site; resubscribe on path only.
+    // Options are static literals per call site; resubscribe on path/db only.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [path]);
+  }, [path, db]);
 
   return { items, isLoading, hiddenInvalidCount };
 }

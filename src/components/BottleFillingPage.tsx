@@ -1,230 +1,387 @@
-import React, { useState, useEffect } from 'react';
+import { useEffect, useState } from "react";
+import { onValue, ref } from "firebase/database";
+import { fillerDb } from "../lib/fillerFirebase";
+import { useHistoryList } from "../hooks/useHistoryList";
+import { Badge } from "./ui/badge";
+import { Progress } from "./ui/progress";
+import { Button } from "./ui/button";
+import {
+  Activity,
+  AlertCircle,
+  Archive,
+  Beaker,
+  CheckCircle,
+  Clock,
+  Droplets,
+  HelpCircle,
+  RotateCcw,
+  WifiOff,
+  XCircle,
+} from "lucide-react";
 
-import { db } from "../lib/firebase";
-import { ref, onValue } from 'firebase/database';
-import { useHistoryList } from '../hooks/useHistoryList';
-import { Activity, Droplets, Archive, Clock, CheckCircle, AlertCircle, Beaker } from 'lucide-react';
+// Validation: the wine-filler project is external/untrusted — every rendered
+// field is validated here first. Anything malformed degrades to spec copy
+// ("—", "Unknown batch", "Unknown filler status"), never a throw.
+type FillStatus = "pass" | "fail" | "unknown";
 
-interface LiveData {
-  status: 'offline' | 'idle' | 'filling' | 'completed';
-  target_volume: number; // Set by the physical machine
-  total_bottles: number; // Set by the physical machine
-  current_bottle: number;
-  ml_dispensed: number;
+const isRecord = (v: unknown): v is Record<string, unknown> =>
+  typeof v === "object" && v !== null && !Array.isArray(v);
+
+const validBatchId = (v: unknown): string | null =>
+  typeof v === "string" && v.length > 0 && v.length <= 64 ? v : null;
+
+const validTime = (v: unknown): number | null =>
+  typeof v === "number" && Number.isFinite(v) && v > 0 ? v : null;
+
+const validTargetMl = (v: unknown): number | null =>
+  typeof v === "number" && Number.isFinite(v) && v >= 1 && v <= 5000 ? v : null;
+
+const validActualMl = (v: unknown): number | null =>
+  typeof v === "number" && Number.isFinite(v) && v >= 0 && v <= 10000 ? v : null;
+
+const validStatus = (v: unknown): FillStatus =>
+  v === "pass" ? "pass" : v === "fail" ? "fail" : "unknown";
+
+interface FillerLive {
+  stage: string;
+  batchId: string | null;
+  startTime: number | null;
+  targetMl: number | null;
+  actualMl: number | null;
 }
 
-interface BatchReport {
-  id: string;
-  date: string;
-  target_volume: number;
-  total_bottles: number;
-  total_yield_ml: number;
-  source_batch_id: string; // Links back to the fermentation batch
+// Object with a non-empty stage → live state (bad numbers become null → "—").
+// Anything else (primitive, missing/empty stage) → null = malformed.
+function parseCurrentBatch(raw: unknown): FillerLive | null {
+  if (!isRecord(raw)) return null;
+  if (typeof raw.stage !== "string" || raw.stage.length === 0) return null;
+  const d = isRecord(raw.details) ? raw.details : {};
+  return {
+    stage: raw.stage,
+    batchId: validBatchId(d.batchId),
+    startTime: validTime(d.startTime),
+    targetMl: validTargetMl(d.targetVolumeMl),
+    actualMl: validActualMl(d.actualVolumeMl),
+  };
 }
 
-interface ActiveFermentationBatch {
-  id: string;
-  mustVolume: number; // in Liters
-}
-
-// Parses strings like "10L" (as stored by FermentationTracker/Dashboard) into a number.
-function parseVolumeLiters(raw: unknown): number {
-  const match = String(raw ?? "0").match(/\d+(\.\d+)?/);
-  return match ? parseFloat(match[0]) : 0;
-}
+const statusLabel = (s: FillStatus) =>
+  s === "pass" ? "Passed" : s === "fail" ? "Failed" : "Unknown";
 
 const BottleFillingMonitor = () => {
-  const [liveData, setLiveData] = useState<LiveData>({
-    status: 'offline',
-    target_volume: 0,
-    total_bottles: 0,
-    current_bottle: 0,
-    ml_dispensed: 0,
+  const unconfigured = fillerDb === null;
+
+  const [live, setLive] = useState<FillerLive | null>(null);
+  const [liveLoaded, setLiveLoaded] = useState(unconfigured);
+  const [fillerError, setFillerError] = useState(false);
+  const [retryKey, setRetryKey] = useState(0);
+
+  // Single filler source: filling/currentBatch. Never throws — listener errors
+  // and malformed snapshots land in the error state with last-good kept.
+  useEffect(() => {
+    if (fillerDb === null) return;
+    let cancelled = false;
+    try {
+      const unsubscribe = onValue(
+        ref(fillerDb, "filling/currentBatch"),
+        (snapshot) => {
+          if (cancelled) return;
+          if (!snapshot.exists()) {
+            setLive(null);
+            setFillerError(false);
+          } else {
+            const parsed = parseCurrentBatch(snapshot.val());
+            if (parsed) {
+              setLive(parsed);
+              setFillerError(false);
+            } else {
+              setFillerError(true);
+            }
+          }
+          setLiveLoaded(true);
+        },
+        () => {
+          if (cancelled) return;
+          setFillerError(true);
+          setLiveLoaded(true);
+        },
+      );
+      return () => {
+        cancelled = true;
+        unsubscribe();
+      };
+    } catch {
+      if (!cancelled) {
+        setFillerError(true);
+        setLiveLoaded(true);
+      }
+    }
+  }, [retryKey]);
+
+  // Filler history newest-first on the filler project; staged chip on primary.
+  const { items: fillerHistory } = useHistoryList(
+    "filling/history",
+    { reverse: true },
+    fillerDb,
+  );
+  const { items: fermaHistory } = useHistoryList("fermentation/history", {
+    sort: (a, b) => (b.completedAt ?? 0) - (a.completedAt ?? 0),
+    limit: 1,
   });
 
-  const [activeBatch, setActiveBatch] = useState<ActiveFermentationBatch | null>(null);
-  // Batch reports history (shared hook: same node, mapping, reverse + latest 5)
-  const { items: recentBatches } = useHistoryList('reports/bottling', {
-    reverse: true,
-    limit: 5,
-  }) as { items: BatchReport[] };
+  const history = fillerHistory.map((item) => ({
+    key: String(item.id),
+    batch: validBatchId(item.batchId) ?? "Unknown batch",
+    actual: validActualMl(item.actualVolumeMl),
+    status: validStatus(item.status),
+  }));
 
-  // 1. Listen to the Active Fermentation Batch
-  // NOTE: FermentationTracker.tsx and Dashboard.tsx both write the active batch to
-  // 'fermentation/currentBatch/details' (with the volume stored as a string like "10L"
-  // under `initialVolume`). This used to point at a different, unused path
-  // ('fermentation/active_batch' / `mustVolume`), so this panel never showed real data.
-  useEffect(() => {
-    const batchRef = ref(db, 'fermentation/currentBatch/details');
-    const unsubscribe = onValue(batchRef, (snapshot) => {
-      if (snapshot.exists()) {
-        const details = snapshot.val();
-        setActiveBatch({
-          id: snapshot.key ?? details.batchId ?? 'active',
-          mustVolume: parseVolumeLiters(details.initialVolume),
-        });
-      } else {
-        setActiveBatch(null);
-      }
-    });
-    return () => unsubscribe();
-  }, []);
+  const latestFerma = fermaHistory[0];
+  const stagedId = validBatchId(latestFerma?.batchId);
+  const stagedYield =
+    typeof latestFerma?.finalYield === "string" && latestFerma.finalYield.length > 0
+      ? latestFerma.finalYield
+      : "—";
 
-  // 2. Listen to the Live ESP32 Telemetry (No sending commands, only reading)
-  useEffect(() => {
-    const liveRef = ref(db, 'system/bottle_filler/live');
-    const unsubscribe = onValue(liveRef, (snapshot) => {
-      if (snapshot.exists()) {
-        setLiveData(snapshot.val());
-      }
-    });
-    return () => unsubscribe();
-  }, []);
+  type PageStatus =
+    | "unconfigured"
+    | "loading"
+    | "idle"
+    | "filling"
+    | "done"
+    | "unknown"
+    | "error";
+  let pageStatus: PageStatus = "loading";
+  if (unconfigured) pageStatus = "unconfigured";
+  else if (fillerError) pageStatus = "error";
+  else if (!liveLoaded) pageStatus = "loading";
+  else if (live === null) pageStatus = history.length > 0 ? "done" : "idle";
+  else if (live.stage === "idle") pageStatus = "idle";
+  else if (live.stage === "filling") pageStatus = "filling";
+  else if (live.stage === "done") pageStatus = "done";
+  else pageStatus = "unknown";
 
-  // Progress Calculations
-  const bottleProgress = liveData.target_volume > 0 
-    ? Math.min((liveData.ml_dispensed / liveData.target_volume) * 100, 100) 
-    : 0;
-    
-  const batchProgress = liveData.total_bottles > 0 
-    ? Math.min((liveData.current_bottle / liveData.total_bottles) * 100, 100) 
-    : 0;
+  const statusBadge = (() => {
+    switch (pageStatus) {
+      case "unconfigured":
+        return (
+          <Badge variant="outline">
+            <WifiOff />
+            Filler not connected
+          </Badge>
+        );
+      case "loading":
+        return (
+          <Badge variant="secondary">
+            <Activity className="animate-pulse" />
+            Reading filler…
+          </Badge>
+        );
+      case "idle":
+        return (
+          <Badge variant="secondary">
+            <Clock />
+            Waiting for operator
+          </Badge>
+        );
+      case "filling":
+        return (
+          <Badge>
+            <Activity className="animate-pulse" />
+            Filling — {live?.batchId ?? "Unknown batch"}
+          </Badge>
+        );
+      case "done":
+        return (
+          <Badge>
+            <CheckCircle />
+            Fill complete
+          </Badge>
+        );
+      case "unknown":
+        return (
+          <Badge variant="outline">
+            <HelpCircle />
+            Unknown filler status
+          </Badge>
+        );
+      case "error":
+        return (
+          <Badge variant="destructive">
+            <AlertCircle />
+            Filler data unavailable
+          </Badge>
+        );
+    }
+  })();
+
+  // Live volume card values. Bad numbers → "—" + "Reading filler…".
+  const targetLabel = live?.targetMl != null ? `${live.targetMl}` : "—";
+  const actualLabel = live?.actualMl != null ? `${live.actualMl}` : "—";
+  const hasNumbers = live?.targetMl != null && live?.actualMl != null;
+  const pct =
+    hasNumbers && live?.targetMl && live?.actualMl != null
+      ? Math.min(Math.max((live.actualMl / live.targetMl) * 100, 0), 100)
+      : 0;
+  const volumeCaption =
+    pageStatus === "idle"
+      ? "Awaiting machine setup…"
+      : hasNumbers
+        ? `${Math.round(pct)}% Filled`
+        : "Reading filler…";
+
+  const showLiveCards =
+    !unconfigured && (live !== null || pageStatus === "idle" || pageStatus === "loading");
 
   return (
     <div className="p-4 max-w-xl mx-auto pb-20 space-y-6">
-      
       {/* HEADER: System Status */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-card p-6 rounded-2xl border border-border">
         <div>
           <h1 className="text-3xl font-bold text-foreground">Bottling Monitor</h1>
-          <p className="text-muted-foreground text-sm mt-1">Live machine telemetry and batch reports</p>
+          <p className="text-muted-foreground text-sm mt-1">
+            Live filler state and fill history
+          </p>
         </div>
-        
-        <div className="flex items-center gap-3">
-          {liveData.status === 'offline' && (
-            <div className="flex items-center gap-2 px-4 py-2 bg-muted text-muted-foreground border border-border rounded-full font-semibold text-sm">
-              <AlertCircle className="w-4 h-4" /> MACHINE OFFLINE
-            </div>
-          )}
-          {liveData.status === 'idle' && (
-            <div className="flex items-center gap-2 px-4 py-2 bg-blue-50 text-blue-700 border border-blue-200 rounded-full font-semibold text-sm">
-              <Clock className="w-4 h-4" /> WAITING FOR OPERATOR
-            </div>
-          )}
-          {liveData.status === 'filling' && (
-            <div className="flex items-center gap-2 px-4 py-2 bg-red-50 text-[#B91C1C] rounded-full font-semibold text-sm border border-red-200">
-              <Activity className="w-4 h-4 animate-pulse" /> MACHINE RUNNING
-            </div>
-          )}
+
+        <div role="status" aria-live="polite" className="flex items-center gap-3">
+          {statusBadge}
         </div>
       </div>
 
-      {/* SOURCE BATCH INFO PANEL */}
-      {activeBatch && (
-        <div className="bg-primary text-primary-foreground rounded-2xl p-6 flex items-center justify-between gap-4">
-          <div className="flex items-center gap-4">
-            <div className="bg-primary-foreground/20 p-3 rounded-2xl">
-              <Beaker className="w-6 h-6 text-primary-foreground" />
+      {pageStatus === "unconfigured" && (
+        <div className="bg-card p-6 rounded-2xl border border-border">
+          <p className="text-muted-foreground text-sm">
+            Filler database isn&apos;t configured. Add VITE_FILLER_* vars and reload.
+          </p>
+        </div>
+      )}
+
+      {pageStatus === "error" && (
+        <div className="bg-card p-6 rounded-2xl border border-destructive/50 space-y-4">
+          <p className="text-muted-foreground text-sm">
+            Couldn&apos;t read the filler database. Check connection and retry.
+          </p>
+          <Button
+            variant="outline"
+            size="lg"
+            className="min-h-[44px]"
+            onClick={() => {
+              setFillerError(false);
+              setRetryKey((k) => k + 1);
+            }}
+          >
+            <RotateCcw />
+            Retry
+          </Button>
+        </div>
+      )}
+
+      {/* STAGED CHIP: latest finished fermentation batch (primary db, read-only) */}
+      <div className="bg-primary text-primary-foreground rounded-2xl p-6 flex items-center gap-4">
+        <div className="bg-primary-foreground/20 p-3 rounded-2xl shrink-0">
+          <Beaker className="w-6 h-6 text-primary-foreground" />
+        </div>
+        <p className="text-xl font-bold">
+          {stagedId
+            ? `Ready to fill: ${stagedId} · ${stagedYield}`
+            : "No finished batch — end a fermentation batch to stage one."}
+        </p>
+      </div>
+
+      {/* MAIN LIVE DASHBOARD */}
+      {showLiveCards && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          {/* Card 1: Live Fill Progress */}
+          <div className="bg-card rounded-2xl border border-border p-6 relative overflow-hidden">
+            <div className="flex justify-between items-start mb-6">
+              <div className="bg-primary/10 p-3 rounded-2xl">
+                <Droplets className="w-6 h-6 text-primary" />
+              </div>
+              <span className="text-xs font-semibold text-muted-foreground uppercase tracking-widest">
+                Live Fill
+              </span>
             </div>
-            <div>
-              <p className="text-primary-foreground/80 text-xs font-semibold uppercase tracking-wider">Currently Bottling</p>
-              <h3 className="text-xl font-bold">Active Fermentation Batch</h3>
+            <div className="mb-2">
+              <h2 className="text-4xl font-extrabold text-foreground tnum">
+                {pageStatus === "idle" ? "0" : actualLabel}
+                <span className="text-xl text-muted-foreground font-medium">
+                  {" "}
+                  / {targetLabel} ml
+                </span>
+              </h2>
             </div>
+            <Progress value={pageStatus === "idle" ? 0 : pct} aria-label="Fill progress" />
+            <p className="text-right text-xs text-muted-foreground font-semibold mt-2">
+              {volumeCaption}
+            </p>
           </div>
-          <div className="text-right">
-            <p className="text-primary-foreground/80 text-xs font-semibold uppercase tracking-wider">Available Must Volume</p>
-            <p className="text-2xl font-extrabold tnum">{activeBatch.mustVolume} Liters</p>
+
+          {/* Card 2: Filler Batch Details */}
+          <div className="bg-card rounded-2xl border border-border p-6">
+            <div className="flex justify-between items-start mb-6">
+              <div className="bg-muted p-3 rounded-2xl">
+                <Archive className="w-6 h-6 text-muted-foreground" />
+              </div>
+              <span className="text-xs font-semibold text-muted-foreground uppercase tracking-widest">
+                Filler Batch
+              </span>
+            </div>
+            <div className="space-y-2 text-sm">
+              <p className="text-2xl font-extrabold text-foreground">
+                {live?.batchId ?? "Unknown batch"}
+              </p>
+              <p className="text-muted-foreground">
+                Started:{" "}
+                {live?.startTime != null
+                  ? new Date(live.startTime).toLocaleString()
+                  : "—"}
+              </p>
+              <p className="text-muted-foreground">
+                Target: {live?.targetMl != null ? `${live.targetMl} ml` : "—"}
+              </p>
+            </div>
           </div>
         </div>
       )}
 
-      {/* MAIN LIVE DASHBOARD (Only shows if machine is active or has data) */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        {/* Card 1: Current Bottle Progress */}
-        <div className="bg-card rounded-2xl border border-border p-6 relative overflow-hidden">
-          <div className="flex justify-between items-start mb-6">
-            <div className="bg-primary/10 p-3 rounded-2xl">
-              <Droplets className="w-6 h-6 text-primary" />
-            </div>
-            <span className="text-xs font-semibold text-muted-foreground uppercase tracking-widest">Live Flow Sensor</span>
+      {/* FILL HISTORY (last-good kept visible in error state) */}
+      {!unconfigured && (
+        <div className="bg-card rounded-2xl border border-border p-6 mt-8">
+          <div className="flex items-center gap-3 mb-6">
+            <CheckCircle className="w-5 h-5 text-emerald-600" />
+            <h3 className="text-lg font-bold text-foreground">Fill History</h3>
           </div>
-          <div className="mb-2">
-            <h2 className="text-4xl font-extrabold text-foreground tnum">
-              {liveData.status === 'idle' ? '0' : liveData.ml_dispensed.toFixed(0)} 
-              <span className="text-xl text-muted-foreground font-medium"> / {liveData.target_volume || 0} ml</span>
-            </h2>
-          </div>
-          <div className="w-full h-4 bg-primary/15 rounded-full mt-6 overflow-hidden">
-            <div className="h-full bg-primary transition-all duration-300 ease-out" style={{ width: `${bottleProgress}%` }} />
-          </div>
-          <p className="text-right text-xs text-muted-foreground font-semibold mt-2">
-            {liveData.status === 'idle' ? 'Awaiting machine setup...' : `${bottleProgress.toFixed(1)}% Filled`}
-          </p>
+          <ul className="divide-y divide-border">
+            {history.length === 0 ? (
+              <li className="py-8 text-center text-muted-foreground italic text-sm">
+                No fill history yet.
+              </li>
+            ) : (
+              history.map((row) => (
+                <li
+                  key={row.key}
+                  className="py-4 flex items-center justify-between gap-3 text-sm"
+                >
+                  <span className="font-medium text-foreground">
+                    {row.batch} · {row.actual != null ? `${row.actual} ml` : "— ml"}
+                  </span>
+                  <span className="inline-flex items-center gap-1 text-muted-foreground font-semibold">
+                    {row.status === "pass" ? (
+                      <CheckCircle className="w-4 h-4 text-emerald-600" />
+                    ) : row.status === "fail" ? (
+                      <XCircle className="w-4 h-4 text-destructive" />
+                    ) : (
+                      <HelpCircle className="w-4 h-4" />
+                    )}
+                    {statusLabel(row.status)}
+                  </span>
+                </li>
+              ))
+            )}
+          </ul>
         </div>
-
-        {/* Card 2: Overall Batch Progress */}
-        <div className="bg-card rounded-2xl border border-border p-6">
-          <div className="flex justify-between items-start mb-6">
-            <div className="bg-muted p-3 rounded-2xl">
-              <Archive className="w-6 h-6 text-muted-foreground" />
-            </div>
-            <span className="text-xs font-semibold text-muted-foreground uppercase tracking-widest">Machine Batch Status</span>
-          </div>
-          <div className="mb-2">
-            <h2 className="text-4xl font-extrabold text-foreground tnum">
-              {liveData.status === 'idle' ? '0' : liveData.current_bottle} 
-              <span className="text-xl text-muted-foreground font-medium"> / {liveData.total_bottles || 0} Bottles</span>
-            </h2>
-          </div>
-          <div className="w-full h-4 bg-primary/15 rounded-full mt-6 overflow-hidden">
-            <div className="h-full bg-primary transition-all duration-500 ease-out" style={{ width: `${batchProgress}%` }} />
-          </div>
-          <p className="text-right text-xs text-muted-foreground font-semibold mt-2">
-            {liveData.status === 'idle' ? 'Ready' : `Batch ${batchProgress.toFixed(0)}% Complete`}
-          </p>
-        </div>
-      </div>
-
-      {/* BATCH REPORTING TABLE */}
-      <div className="bg-card rounded-2xl border border-border p-6 mt-8">
-        <div className="flex items-center gap-3 mb-6">
-          <CheckCircle className="w-5 h-5 text-emerald-600" />
-          <h3 className="text-lg font-bold text-foreground">Completed Packaging Reports</h3>
-        </div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-sm">
-            <thead>
-              <tr className="text-muted-foreground border-b border-border uppercase tracking-wider text-xs">
-                <th className="pb-3 font-semibold">Date & Time</th>
-                <th className="pb-3 font-semibold">Machine Settings</th>
-                <th className="pb-3 font-semibold">Total Packaged</th>
-                <th className="pb-3 font-semibold text-right">Status</th>
-              </tr>
-            </thead>
-            <tbody className="text-muted-foreground">
-              {recentBatches.length === 0 ? (
-                <tr>
-                  <td colSpan={4} className="py-8 text-center text-muted-foreground italic">No packaging reports recorded yet.</td>
-                </tr>
-              ) : (
-                recentBatches.map((batch) => (
-                  <tr key={batch.id} className="border-b border-border last:border-0 hover:bg-accent transition-colors">
-                    <td className="py-4 font-medium text-foreground">{new Date(batch.date).toLocaleString()}</td>
-                    <td className="py-4">{batch.total_bottles} Bottles @ {batch.target_volume}ml</td>
-                    <td className="py-4 font-bold text-primary tnum">{(batch.total_yield_ml / 1000).toFixed(2)} Liters</td>
-                    <td className="py-4 text-right">
-                      <span className="inline-flex items-center gap-1 px-2.5 py-0.5 bg-emerald-50 text-emerald-700 text-xs font-semibold rounded-full border border-emerald-200">
-                        Completed
-                      </span>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
+      )}
     </div>
   );
 };
