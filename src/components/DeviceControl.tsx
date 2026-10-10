@@ -278,7 +278,7 @@ export default function DeviceControl() {
       value: "-- Brix",
       enabled: true,
       // No controlKey: this isn't ESP32 hardware — the operator logs Brix by hand
-      // from the Dashboard. See handleLogSugarTest() in Dashboard.tsx.
+      // from the Dashboard. See handleLogSugarTest() in useBatchActions.ts.
     },
     {
       id: "3",
@@ -301,16 +301,6 @@ export default function DeviceControl() {
       value: "Unavailable",
       enabled: true,
       controlKey: "sugarMonitor",
-    },
-    {
-      id: "5",
-      name: "Backup Sensor",
-      type: "sensor",
-      status: "offline",
-      icon: ActivityIcon,
-      lastUpdate: "No heartbeat",
-      value: "N/A",
-      enabled: false,
     },
     {
       id: "6",
@@ -341,8 +331,8 @@ export default function DeviceControl() {
   const [loadingId, setLoadingId] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
 
-  // ✅ Track offline notifications to avoid spamming the database
-  const hasNotifiedOfflineRef = useRef<boolean>(false);
+  // Notify only on online↔offline transitions; mount seeds prev with no push.
+  const prevStatusRef = useRef<string | null>(null);
   // Freshest heartbeat seen from each source. The dedicated status node wins;
   // live sensor data is the fallback for firmware that never writes it.
   const statusLastSeenRef = useRef<number | undefined>(undefined);
@@ -356,12 +346,17 @@ export default function DeviceControl() {
     // not sensors/current/sugarBrix — that path is never written, so it was read here separately.
     const sugarRef = ref(db, "sensors/sugar/current");
 
-    // ✅ Helper to push offline notification
+    // Push only on online↔offline transitions; first call seeds prev and stays silent.
     const checkAndNotifyOfflineStatus = async (status: string) => {
         if (!db) return;
-        
-        if (status === "offline" && !hasNotifiedOfflineRef.current) {
-            hasNotifiedOfflineRef.current = true;
+        if (prevStatusRef.current === null) {
+            prevStatusRef.current = status;
+            return;
+        }
+        if (status === prevStatusRef.current) return;
+        prevStatusRef.current = status;
+
+        if (status === "offline") {
             try {
                 await push(ref(db, 'notifications'), {
                     type: 'warning',
@@ -374,9 +369,7 @@ export default function DeviceControl() {
             } catch (e) {
                 console.error("Failed to send offline notification:", e);
             }
-        } else if (status === "online" && hasNotifiedOfflineRef.current) {
-            // Reset the flag if it comes back online, optionally send a success notification
-            hasNotifiedOfflineRef.current = false;
+        } else if (status === "online") {
              try {
                 await push(ref(db, 'notifications'), {
                     type: 'success',
@@ -675,15 +668,18 @@ export default function DeviceControl() {
 
   // Refresh previously only recomputed from LOCAL state, so it could never
   // fix a stale/missed listener update — the button visibly did nothing. It
-  // now re-reads the three source paths from Firebase and applies them.
+  // now re-reads the source paths from Firebase and applies them (sorter/
+  // filler skipped when their DB is unconfigured).
   const refreshAllDevices = async () => {
     if (!db || refreshing) return;
     setRefreshing(true);
     try {
-      const [statusSnap, currentSnap, sugarSnap] = await Promise.all([
+      const [statusSnap, currentSnap, sugarSnap, sorterSnap, fillerSnap] = await Promise.all([
         get(ref(db, "deviceStatus/sugarMonitor")),
         get(ref(db, "sensors/current")),
         get(ref(db, "sensors/sugar/current")),
+        sorterDb ? get(ref(sorterDb, "bignay_sorter")) : Promise.resolve(null),
+        fillerDb ? get(ref(fillerDb, "filling/currentBatch")) : Promise.resolve(null),
       ]);
 
       const current = currentSnap.val();
@@ -716,6 +712,43 @@ export default function DeviceControl() {
               lastUpdate: sugarTime ? formatLastSeen(sugarTime) : device.lastUpdate,
             };
           }
+          if (device.readOnly === true && device.type === "sorter" && sorterSnap) {
+            const entries = (sorterSnap.val() ?? {}) as Record<string, SorterEntry>;
+            if (Object.keys(entries).length === 0) {
+              return { ...device, status: "online", value: "No fruits sorted yet", lastUpdate: "Connected" };
+            }
+            const key = latestEntryKey(entries);
+            const count = sortedKeys(entries).length;
+            return { ...device, status: "online", value: `${count} fruits sorted • last ${key}`, lastUpdate: "Connected" };
+          }
+          if (device.readOnly === true && device.type === "filler" && fillerSnap) {
+            const data = fillerSnap.val();
+            if (!data || typeof data !== "object") {
+              return { ...device, status: "online", value: "Waiting for first fill", lastUpdate: "Connected" };
+            }
+            const rawStage = data.stage;
+            const stage = typeof rawStage === "string" && rawStage.trim() !== "" ? rawStage : "";
+            const rawId = data.details?.batchId;
+            const batchId = typeof rawId === "string" && rawId.trim() !== "" ? rawId : undefined;
+            const id = batchId ?? "—";
+            let status: "online" | "offline" = "online";
+            let value = `Unknown status · ${id}`;
+            let lastUpdate = "Connected";
+            if (!stage) {
+              value = "Waiting for first fill";
+            } else if (stage === "dispensing" || stage === "filling") {
+              value = `Filling — ${id}`;
+            } else if (stage === "done") {
+              value = `Fill complete · ${id}`;
+            } else if (stage === "error") {
+              status = "offline";
+              value = `Fill error · ${id}`;
+              lastUpdate = "Filler reported an error";
+            } else if (stage === "idle") {
+              value = batchId ? `Idle · ${batchId}` : "Idle";
+            }
+            return { ...device, status, value, lastUpdate };
+          }
           return device;
         })
       );
@@ -727,8 +760,7 @@ export default function DeviceControl() {
   };
 
   // Count only real ESP32 hardware toward online/total — the manual-entry
-  // row and the placeholder backup row can never be "online" and previously
-  // dragged the headline count down permanently.
+  // row can never be "online" and would drag the headline count down permanently.
   const hardwareDevices = devices.filter((d) => d.controlKey === "sugarMonitor");
   const onlineDevices = hardwareDevices.filter((d) => d.status === "online").length;
   const totalDevices = hardwareDevices.length;
