@@ -425,7 +425,7 @@ const BottleFillingMonitor = () => {
                   className="py-4 flex items-center justify-between gap-3 text-sm"
                 >
                   <span className="font-medium text-foreground">
-                    {row.batch} · {row.actual != null ? `${row.actual} ml` : "— ml"}
+                    {row.batch} · {row.actual != null ? `${row.actual.toFixed(1)} ml` : "— ml"}
                   </span>
                   <span className="inline-flex items-center gap-1 text-muted-foreground font-semibold">
                     {row.status === "pass" ? (

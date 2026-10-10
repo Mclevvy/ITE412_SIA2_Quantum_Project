@@ -87,7 +87,7 @@ export default function BatchRecordSheet({ open, onOpenChange, report }: BatchRe
   const estimateLabel =
     typeof report?.finalYield === "string" && report.finalYield.length > 0 ? report.finalYield : "—";
   const bottledText = hasBottled
-    ? `Bottled ${bottledMl} ml of ${estimateLabel} estimated${estimateMl ? ` (${Math.round((bottledMl / estimateMl) * 100)}%)` : ""}${fillerIds.length ? ` · ${fillerIds.join(", ")}` : ""}`
+    ? `Bottled ${bottledMl.toFixed(1)} ml of ${estimateLabel} estimated${estimateMl ? ` (${Math.round((bottledMl / estimateMl) * 100)}%)` : ""}${fillerIds.length ? ` · ${fillerIds.join(", ")}` : ""}`
     : null;
 
   useEffect(() => {
