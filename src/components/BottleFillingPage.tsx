@@ -182,7 +182,7 @@ const BottleFillingMonitor = () => {
       const actual = validActualMl(item.actualVolumeMl);
       if (end == null || actual == null) return;
       update(ref(db, `fermentation/history/${stagedKey}/fills`), {
-        [fillerKey]: { actualVolumeMl: actual, status: validStatus(item.status), endTime: end },
+        [fillerKey]: { actualVolumeMl: actual, status: validStatus(item.status), endTime: end, fillerBatchId: validBatchId(item.batchId) ?? "Unknown batch" },
       })
         .then(() => linkedRef.current.add(fillerKey))
         .catch((err) => console.error("fill link failed", err));

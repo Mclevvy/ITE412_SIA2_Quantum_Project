@@ -73,6 +73,9 @@ export default function BatchRecordSheet({ open, onOpenChange, report }: BatchRe
     0,
   );
   const hasBottled = fillsEntries.some((f: any) => isBottledMl(f?.actualVolumeMl));
+  const fillerIds = [...new Set(
+    fillsEntries.map((f: any) => f?.fillerBatchId).filter((v): v is string => typeof v === "string" && v.length > 0),
+  )];
   // "3L"-style estimate → ml (first integer × 1000); num.ts has no yield parser.
   const estimateMl = (() => {
     if (typeof report?.finalYield !== "string") return null;
@@ -84,7 +87,7 @@ export default function BatchRecordSheet({ open, onOpenChange, report }: BatchRe
   const estimateLabel =
     typeof report?.finalYield === "string" && report.finalYield.length > 0 ? report.finalYield : "—";
   const bottledText = hasBottled
-    ? `Bottled ${bottledMl} ml of ${estimateLabel} estimated${estimateMl ? ` (${Math.round((bottledMl / estimateMl) * 100)}%)` : ""}`
+    ? `Bottled ${bottledMl} ml of ${estimateLabel} estimated${estimateMl ? ` (${Math.round((bottledMl / estimateMl) * 100)}%)` : ""}${fillerIds.length ? ` · ${fillerIds.join(", ")}` : ""}`
     : null;
 
   useEffect(() => {
