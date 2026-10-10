@@ -88,6 +88,14 @@ Conventions: named app + HMR-safe reuse; `null` = unavailable and every reader d
 - [ ] typecheck exit 0 + build pass.
 
 ## Open questions (need your answers before implement)
-1. What `stage` strings does the filler firmware actually write (`filling`? `done`/`complete`? `error`?) — need the exact enum.
-2. Does `filling/history` need linkage to ferma-9eb60 `batchId` (today `FILL-69239` looks hardware-generated, no ferma key)?
+1. What `stage` strings does the filler firmware actually write (`filling`? `done`/`complete`? `error`)?
+2. Does `filling/history` need linkage to the ferma `batchId` (today's `FILL-69239` looks hardware-generated)?
 3. Are wine-filler RTDB rules read-only-public / locked-write — stay read-only forever, or do you want app→filler writes later?
+
+## Addendum A — fill-to-report linkage (approved 2026-10-10)
+- **Trigger (completion event):** a new child under `filling/history` with a valid `endTime`. (`stage` ignored for this — unconfirmed strings.)
+- **Attribution:** the ferma batch staged ("Ready to fill") at completion time = latest `fermentation/history` by `completedAt`. No firmware change, no extra taps.
+- **Storage (ferma side only — wine-filler stays read-untouched):** `fermentation/history/{fermaKey}/fills/{fillerPushKey} = { actualVolumeMl, status, endTime }`. Writes only keys not yet linked (ref + one read per staged-batch change; rewrites are value-identical so harmless). Failure → `console.error` only (background sync, no alert spam). Rules already allow it (operator-email write on `fermentation`).
+- **Report:** Batch Record sheet gains an Estimated-vs-Actual row from `report.finalYield` vs summed `report.fills[].actualVolumeMl` (ml; estimate parsed to ml). Rendered only when fills exist (same "only when present" pattern as harvest cells); otherwise the sheet is unchanged.
+- **Stated limits:** linkage is recorded only while the app is open to witness the completion; if staging moves mid-fill, attribution follows the staging.
+- **Acceptance:** complete a fill with #8204 staged → its history record gains `fills/{key}`; sheet shows Bottled X ml of Y estimated; typecheck + build green.

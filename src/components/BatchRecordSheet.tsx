@@ -65,6 +65,27 @@ export default function BatchRecordSheet({ open, onOpenChange, report }: BatchRe
   const ripeKg = typeof harvest?.ripeKg === "number" && Number.isFinite(harvest.ripeKg) ? harvest.ripeKg : null;
   const unripeKg = typeof harvest?.unripeKg === "number" && Number.isFinite(harvest.unripeKg) ? harvest.unripeKg : null;
   const hasHarvest = ripeKg !== null && unripeKg !== null;
+  const fillsEntries =
+    report?.fills && typeof report.fills === "object" ? Object.values(report.fills) : [];
+  const isBottledMl = (v: unknown) => typeof v === "number" && Number.isFinite(v) && v >= 0;
+  const bottledMl = fillsEntries.reduce(
+    (sum: number, f: any) => (isBottledMl(f?.actualVolumeMl) ? sum + (f.actualVolumeMl as number) : sum),
+    0,
+  );
+  const hasBottled = fillsEntries.some((f: any) => isBottledMl(f?.actualVolumeMl));
+  // "3L"-style estimate → ml (first integer × 1000); num.ts has no yield parser.
+  const estimateMl = (() => {
+    if (typeof report?.finalYield !== "string") return null;
+    const m = report.finalYield.match(/(\d+)/);
+    if (!m) return null;
+    const n = parseInt(m[1], 10);
+    return Number.isFinite(n) && n > 0 ? n * 1000 : null;
+  })();
+  const estimateLabel =
+    typeof report?.finalYield === "string" && report.finalYield.length > 0 ? report.finalYield : "—";
+  const bottledText = hasBottled
+    ? `Bottled ${bottledMl} ml of ${estimateLabel} estimated${estimateMl ? ` (${Math.round((bottledMl / estimateMl) * 100)}%)` : ""}`
+    : null;
 
   useEffect(() => {
     // Push-generated keys never contain these chars; guard anyway so a
@@ -322,6 +343,12 @@ export default function BatchRecordSheet({ open, onOpenChange, report }: BatchRe
               </div>
             ))}
           </div>
+
+          {bottledText && (
+            <div className="rounded-xl border border-border bg-muted p-2 mb-4">
+              <p className="text-sm font-semibold text-foreground tnum">{bottledText}</p>
+            </div>
+          )}
 
           {report?.aiAccuracy && (
             <Card className="mb-4">

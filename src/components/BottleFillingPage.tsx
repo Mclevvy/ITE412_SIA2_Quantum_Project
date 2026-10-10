@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { onValue, ref } from "firebase/database";
+import { useEffect, useRef, useState } from "react";
+import { get, onValue, ref, update } from "firebase/database";
 import { fillerDb } from "../lib/fillerFirebase";
 import { db } from "../lib/firebase";
 import { useHistoryList } from "../hooks/useHistoryList";
@@ -151,6 +151,43 @@ const BottleFillingMonitor = () => {
     typeof latestFerma?.finalYield === "string" && latestFerma.finalYield.length > 0
       ? latestFerma.finalYield
       : "—";
+  const stagedKey =
+    typeof latestFerma?.id === "string" && latestFerma.id.length > 0 ? latestFerma.id : null;
+
+  // Fill-to-report linkage (Addendum A): primary-db writes only, never filler.
+  const linkedRef = useRef<Set<string>>(new Set());
+
+  // Seed already-linked keys once per staged-batch change (single read).
+  useEffect(() => {
+    linkedRef.current = new Set();
+    if (!stagedKey || /[.#$\[\]/]/.test(stagedKey)) return;
+    let cancelled = false;
+    get(ref(db, `fermentation/history/${stagedKey}/fills`))
+      .then((snap) => {
+        if (!cancelled && snap.exists()) linkedRef.current = new Set(Object.keys(snap.val() ?? {}));
+      })
+      .catch((err) => console.error("fill link seed failed", err));
+    return () => {
+      cancelled = true;
+    };
+  }, [stagedKey]);
+
+  // Link each completed fill (valid endTime) once, using validated values only.
+  useEffect(() => {
+    if (!stagedKey || /[.#$\[\]/]/.test(stagedKey)) return;
+    fillerHistory.forEach((item) => {
+      const fillerKey = typeof item?.id === "string" ? item.id : null;
+      if (!fillerKey || /[.#$\[\]/]/.test(fillerKey) || linkedRef.current.has(fillerKey)) return;
+      const end = validTime(item.endTime);
+      const actual = validActualMl(item.actualVolumeMl);
+      if (end == null || actual == null) return;
+      update(ref(db, `fermentation/history/${stagedKey}/fills`), {
+        [fillerKey]: { actualVolumeMl: actual, status: validStatus(item.status), endTime: end },
+      })
+        .then(() => linkedRef.current.add(fillerKey))
+        .catch((err) => console.error("fill link failed", err));
+    });
+  }, [fillerHistory, stagedKey]);
 
   type PageStatus =
     | "unconfigured"

@@ -49,3 +49,14 @@
 
 ## Task 5: Ship (TONI)
 - [ ] Secret scan, commit, push bunius/origin/fork; thor audit; steve README section; vault append
+
+## Task 6: fill-to-report linkage (natasha, owns BottleFillingPage.tsx + BatchRecordSheet.tsx only)
+**Description:** Per spec Addendum A: watcher on `filling/history` links each completed fill (valid `endTime`) to the staged ferma batch by writing `fermentation/history/{fermaKey}/fills/{fillerKey} = {actualVolumeMl,status,endTime}` for not-yet-linked keys only; Batch Record sheet renders Estimated-vs-Actual row when fills exist.
+**Acceptance criteria:**
+- [ ] New completed fill with a staged batch → `fills/{key}` appears on that batch's history record; no duplicate churn (linked-key ref)
+- [ ] Sheet shows "Bottled X ml of Y estimated" only when fills exist; no fills → sheet unchanged
+- [ ] No writes into wine-filler; background failures log only, never alert
+**Verification:** typecheck exit 0; build pass; manual: complete a fill (or simulate row) with #8204 staged
+**Dependencies:** Tasks 3–4 (done)
+**Files:** `src/components/BottleFillingPage.tsx`, `src/components/BatchRecordSheet.tsx`
+**Scope:** M
