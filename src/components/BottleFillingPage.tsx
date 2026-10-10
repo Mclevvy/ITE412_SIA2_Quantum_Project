@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { onValue, ref } from "firebase/database";
 import { fillerDb } from "../lib/fillerFirebase";
+import { db } from "../lib/firebase";
 import { useHistoryList } from "../hooks/useHistoryList";
 import { Badge } from "./ui/badge";
 import { Progress } from "./ui/progress";
@@ -75,6 +76,14 @@ const BottleFillingMonitor = () => {
   const [liveLoaded, setLiveLoaded] = useState(unconfigured);
   const [fillerError, setFillerError] = useState(false);
   const [retryKey, setRetryKey] = useState(0);
+  const [fermentingId, setFermentingId] = useState<string | null>(null);
+
+  // Currently-fermenting batch id (primary db, read-only, presence only).
+  useEffect(() => {
+    return onValue(ref(db, "fermentation/currentBatch/details"), (snap) => {
+      setFermentingId(snap.exists() ? validBatchId(snap.val()?.batchId) : null);
+    });
+  }, []);
 
   // Single filler source: filling/currentBatch. Never throws — listener errors
   // and malformed snapshots land in the error state with last-good kept.
@@ -288,6 +297,11 @@ const BottleFillingMonitor = () => {
             : "No finished batch — end a fermentation batch to stage one."}
         </p>
       </div>
+      {fermentingId && (
+        <p className="text-sm text-muted-foreground">
+          Fermenting now: {fermentingId} (not ended)
+        </p>
+      )}
 
       {/* MAIN LIVE DASHBOARD */}
       {showLiveCards && (
