@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { onValue, ref, update } from "firebase/database";
+import { onValue, push, ref, update } from "firebase/database";
 import { db } from "../lib/firebase";
 import { sorterDb } from "../lib/sorterFirebase";
 import { summarizeSorting, countsFromKg, latestEntryKey, type SorterEntry } from "../lib/sortingStats";
@@ -36,6 +36,9 @@ export default function FruitSorting() {
   const [formOpen, setFormOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [samples, setSamples] = useState<Record<string, { count?: unknown; markedAt?: unknown }> | null>(null);
+  const [ignoring, setIgnoring] = useState(false);
+  const [ignoreError, setIgnoreError] = useState<string | null>(null);
 
   // Active batch: its id and the sorting baseline captured at Start Batch.
   useEffect(() => {
@@ -66,6 +69,13 @@ export default function FruitSorting() {
     );
   }, []);
 
+  // Audit ranges for test bursts ignored via the baseline re-cut (best-effort).
+  useEffect(() => {
+    return onValue(ref(db, "fermentation/sorterSamples"), (snap) => {
+      setSamples(snap.exists() ? (snap.val() as Record<string, { count?: unknown; markedAt?: unknown }>) : {});
+    });
+  }, []);
+
   // A batch with no baseline field is "not captured"; a baseline with key null
   // means the log was empty then, so every entry belongs to this batch.
   const baselinePresent = batch?.sortingBaseline !== undefined;
@@ -87,6 +97,60 @@ export default function FruitSorting() {
   // A recorded hand-weighed harvest means the batch was sorted by hand, so it
   // IS this batch's result — it wins over a leftover/empty machine log.
   const summary = manualSummary ?? liveSummary;
+
+  // Entries after the baseline = what "Ignore entries so far" would skip.
+  // Live total when attributable; whole-log total when the baseline key is gone.
+  const wholeLogTotal = useMemo(
+    () => (entries ? (summarizeSorting(entries, null)?.total ?? 0) : 0),
+    [entries]
+  );
+  const ignoreCount = liveSummary ? liveSummary.total : wholeLogTotal;
+  const showIgnore =
+    !!batch && entries !== null && Object.keys(entries).length > 0 && ignoreCount > 0;
+
+  const sampleSummary = useMemo(() => {
+    if (!samples) return null;
+    const records = Object.values(samples);
+    if (!records.length) return null;
+    let sum = 0;
+    let max = 0;
+    for (const r of records) {
+      if (typeof r?.count === "number" && Number.isFinite(r.count)) sum += r.count;
+      if (typeof r?.markedAt === "number" && Number.isFinite(r.markedAt) && r.markedAt > max) max = r.markedAt;
+    }
+    return { sum, max };
+  }, [samples]);
+
+  const ignoreEntriesSoFar = async () => {
+    if (!entries || !batch) return;
+    const key = latestEntryKey(entries);
+    if (!key) return;
+    const n = ignoreCount;
+    if (n <= 0) return;
+    if (!window.confirm(`Ignore ${n} sorter entries so far and count from the next berry?`)) return;
+    setIgnoring(true);
+    setIgnoreError(null);
+    try {
+      // Child-path merge so the rest of details survives; key stays a string.
+      await update(ref(db, "fermentation/currentBatch"), { "details/sortingBaseline": { key } });
+    } catch (error) {
+      setIgnoreError(writeErrorMessage(error, "Couldn't save — check your connection."));
+      return;
+    } finally {
+      setIgnoring(false);
+    }
+    try {
+      await push(ref(db, "fermentation/sorterSamples"), {
+        upToKey: key,
+        count: n,
+        markedAt: Date.now(),
+        batchId: batch.batchId || "Unknown batch",
+        reason: "test",
+      });
+    } catch {
+      console.error("Couldn't record the ignored sorter range.");
+    }
+  };
 
   const blockedMessage = !batchLoaded
     ? "Loading batch…"
@@ -251,6 +315,21 @@ export default function FruitSorting() {
             </Card>
           </motion.div>
         )
+      )}
+
+      {showIgnore && (
+        <div className="text-center space-y-1">
+          <Button variant="outline" size="sm" onClick={ignoreEntriesSoFar} disabled={ignoring}>
+            {ignoring ? "Ignoring…" : "Ignore entries so far"}
+          </Button>
+          {ignoreError && <p className="text-xs text-destructive">{ignoreError}</p>}
+        </div>
+      )}
+
+      {sampleSummary && (
+        <p className="text-xs text-muted-foreground text-center">
+          {`Ignoring ${sampleSummary.sum} test entries · last marked ${new Date(sampleSummary.max || Date.now()).toLocaleDateString()}`}
+        </p>
       )}
 
       {batch && (manualSummary === null || formOpen) && (

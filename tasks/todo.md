@@ -66,3 +66,6 @@ Per spec Addendum B: map `dispensing`→Active, `error`→Error copy; live progr
 
 ## Task 8: sample bucket (natasha, owns BottleFillingPage.tsx only)
 Per spec Addendum C: completed fill with an ACTIVE batch → `fermentation/samples/{fillerKey}` (not staged); Sample badge on matching history rows; staged path otherwise unchanged.
+
+## Task 9: sorter sample ranges (natasha, owns FruitSorting.tsx + sortingStats.ts only)
+Per spec Addendum D: "Ignore entries so far" button (confirm-gated) re-cuts baseline to latest key + pushes audit range to `fermentation/sorterSamples`; muted status line; harvest path untouched.

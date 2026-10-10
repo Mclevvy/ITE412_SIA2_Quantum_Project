@@ -100,15 +100,23 @@ Conventions: named app + HMR-safe reuse; `null` = unavailable and every reader d
 - **Stated limits:** linkage is recorded only while the app is open to witness the completion; if staging moves mid-fill, attribution follows the staging.
 - **Acceptance:** complete a fill with #8204 staged → its history record gains `fills/{key}`; sheet shows Bottled X ml of Y estimated; typecheck + build green.
 
-## Addendum C — sample bucket (approved 2026-10-10)
-- Rule: at fill completion, if a fermentation batch is ACTIVE (`fermentation/currentBatch` exists), the fill is NOT linked to the staged finished batch — it goes to the sample bucket. Only with no active batch does Addendum A staging apply. (Process is end-then-fill, so anything poured mid-fermentation is a test/sample or otherwise unidentifiable.)
-- Storage: `fermentation/samples/{fillerPushKey} = { actualVolumeMl, status, endTime, fillerBatchId, reason: "active-batch", linkedAt }`. Same validators, same linked-once gating (seed covers staged fills + samples), same console.error-only failures. Covered by existing `fermentation/.write` operator rule — no rules change.
-- Display: Fill History rows whose key exists in `samples` carry a small "Sample" badge (existing Badge styles). No new sections; the bucket stays out of `fermentation/history` so Reports aggregates are untouched.
-- Edge, stated: bottling finished wine while another batch ferments also lands in samples (attribution follows the rule, not intent); moving a sample to a real batch is a future slice, not this one.
-
 ## Addendum B — confirmed filler contract (firmware source reviewed 2026-10-10)
 - Stage enum is `idle | dispensing | done | error` (DONE shows ~3 s then flips to idle; history row is the durable signal).
 - `dispensing` ≡ Active ("Filling — {id}"); `error` (safety timeout) → Error block with copy "Filler reported an error." (Retry + last-good kept); `done` → Done; `idle` → Idle. Unknown strings still → "Unknown filler status".
 - `details.dispensedMl` (optional, firmware PUTs it ~1/s mid-pour): valid finite 0..10000 → live progress `dispensed/target`; absent → indeterminate "Reading filler…".
 - History `status: "manual"` (manual-hold pours are now logged by firmware): label "Manual".
 - `startTime`/`endTime` are **millis-since-boot, not epoch** until firmware ships NTP: values `< 1e12` render as uptime duration ("X min after machine boot"), `>= 1e12` as dates. Real epoch-ms flows through untouched once NTP lands.
+
+## Addendum C — sample bucket (approved 2026-10-10)
+- Rule: at fill completion, if a fermentation batch is ACTIVE (`fermentation/currentBatch` exists), the fill is NOT linked to the staged finished batch — it goes to the sample bucket. Only with no active batch does Addendum A staging apply. (Process is end-then-fill, so anything poured mid-fermentation is a test/sample or otherwise unidentifiable.)
+- Storage: `fermentation/samples/{fillerPushKey} = { actualVolumeMl, status, endTime, fillerBatchId, reason: "active-batch", linkedAt }`. Same validators, same linked-once gating (seed covers staged fills + samples), same console.error-only failures. Covered by existing `fermentation/.write` operator rule — no rules change.
+- Display: Fill History rows whose key exists in `samples` carry a small "Sample" badge (existing Badge styles). No new sections; the bucket stays out of `fermentation/history` so Reports aggregates are untouched.
+- Edge, stated: bottling finished wine while another batch ferments also lands in samples (attribution follows the rule, not intent); moving a sample to a real batch is a future slice, not this one.
+
+## Addendum D — sorter sample ranges (approved 2026-10-10)
+- Context: process is start-batch-then-sort; the polluter is the sorter dev's TEST bursts during the active batch. Real and test entries are indistinguishable automatically; at berry scale only prefix-exclusion is sane (tests precede real runs).
+- UX: one "Ignore entries so far" button on the Fruit Sorting page (visible only with an active batch + non-empty log). `window.confirm` first (destructive to current live counts): copies the entries-ignored count.
+- Write 1 (counts): `details/sortingBaseline = { key: latestEntryKey }` via child-path merge (same pattern as harvest save; sentinel stays a string, never null). Batch then owns only future berries.
+- Write 2 (bucket/audit): `push(fermentation/sorterSamples, { upToKey, count, markedAt: Date.now(), batchId, reason: "test" })` AFTER write 1 succeeds; failure → console.error only (counts are already correct; audit is best-effort).
+- Display: one muted line under the summary (`Ignoring N test entries · last marked {date}`) from the samples node; no per-key UI. Manual-harvest display path untouched (harvest still outranks the log).
+- Gap entries (no active batch) stay excluded by the next baseline cut as today — not recorded, out of scope.
