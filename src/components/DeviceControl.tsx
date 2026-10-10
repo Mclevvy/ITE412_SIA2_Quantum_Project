@@ -16,7 +16,6 @@ import {
   WifiIcon,
   WifiOffIcon,
   ThermometerIcon,
-  CameraIcon,
   DropletIcon,
   FlaskConicalIcon,
   RefreshCwIcon,
@@ -292,17 +291,6 @@ export default function DeviceControl() {
       controlKey: "sugarMonitor",
     },
     {
-      id: "4",
-      name: "Camera Module",
-      type: "camera",
-      status: "offline",
-      icon: CameraIcon,
-      lastUpdate: "Waiting for device...",
-      value: "Unavailable",
-      enabled: true,
-      controlKey: "sugarMonitor",
-    },
-    {
       id: "6",
       name: "Fruit Sorting Machine",
       type: "sorter",
@@ -456,10 +444,6 @@ export default function DeviceControl() {
               typeof data.ph === "number"
                 ? { ...next, value: `${data.ph.toFixed(2)} pH` }
                 : next;
-          }
-
-          if (device.name === "Camera Module") {
-            next = { ...next, value: "Monitoring" };
           }
 
           if (device.controlKey === "sugarMonitor") {
@@ -699,9 +683,6 @@ export default function DeviceControl() {
             }
             if (device.name === "Acidity Sensor" && typeof current?.ph === "number") {
               next.value = `${current.ph.toFixed(2)} pH`;
-            }
-            if (device.name === "Camera Module" && current) {
-              next.value = "Monitoring";
             }
             return next;
           }
