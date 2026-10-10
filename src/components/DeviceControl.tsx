@@ -740,11 +740,8 @@ export default function DeviceControl() {
     }
   };
 
-  // Count only real ESP32 hardware toward online/total — the manual-entry
-  // row can never be "online" and would drag the headline count down permanently.
   const hardwareDevices = devices.filter((d) => d.controlKey === "sugarMonitor");
-  const onlineDevices = hardwareDevices.filter((d) => d.status === "online").length;
-  const totalDevices = hardwareDevices.length;
+  const sensorOnline = hardwareDevices.some((d) => d.status === "online");
   const systemActive = devices.some(
     (d) => d.controlKey === "sugarMonitor" && d.status === "online" && d.enabled
   );
@@ -771,9 +768,9 @@ export default function DeviceControl() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-foreground font-bold text-2xl tnum">
-                  {onlineDevices}/{totalDevices}
+                  {sensorOnline ? "Online" : "Offline"}
                 </p>
-                <p className="text-xs text-muted-foreground mt-1">Devices Online</p>
+                <p className="text-xs text-muted-foreground mt-1">Sensor Status</p>
               </div>
               <WifiIcon className="w-8 h-8 text-emerald-600" />
             </div>
