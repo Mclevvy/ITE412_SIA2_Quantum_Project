@@ -99,3 +99,10 @@ Conventions: named app + HMR-safe reuse; `null` = unavailable and every reader d
 - **Report:** Batch Record sheet gains an Estimated-vs-Actual row from `report.finalYield` vs summed `report.fills[].actualVolumeMl` (ml; estimate parsed to ml). Rendered only when fills exist (same "only when present" pattern as harvest cells); otherwise the sheet is unchanged.
 - **Stated limits:** linkage is recorded only while the app is open to witness the completion; if staging moves mid-fill, attribution follows the staging.
 - **Acceptance:** complete a fill with #8204 staged → its history record gains `fills/{key}`; sheet shows Bottled X ml of Y estimated; typecheck + build green.
+
+## Addendum B — confirmed filler contract (firmware source reviewed 2026-10-10)
+- Stage enum is `idle | dispensing | done | error` (DONE shows ~3 s then flips to idle; history row is the durable signal).
+- `dispensing` ≡ Active ("Filling — {id}"); `error` (safety timeout) → Error block with copy "Filler reported an error." (Retry + last-good kept); `done` → Done; `idle` → Idle. Unknown strings still → "Unknown filler status".
+- `details.dispensedMl` (optional, firmware PUTs it ~1/s mid-pour): valid finite 0..10000 → live progress `dispensed/target`; absent → indeterminate "Reading filler…".
+- History `status: "manual"` (manual-hold pours are now logged by firmware): label "Manual".
+- `startTime`/`endTime` are **millis-since-boot, not epoch** until firmware ships NTP: values `< 1e12` render as uptime duration ("X min after machine boot"), `>= 1e12` as dates. Real epoch-ms flows through untouched once NTP lands.

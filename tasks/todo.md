@@ -60,3 +60,6 @@
 **Dependencies:** Tasks 3–4 (done)
 **Files:** `src/components/BottleFillingPage.tsx`, `src/components/BatchRecordSheet.tsx`
 **Scope:** M
+
+## Task 7: confirmed filler contract (natasha, owns BottleFillingPage.tsx only)
+Per spec Addendum B: map `dispensing`→Active, `error`→Error copy; live progress from `details.dispensedMl`; `manual` status label; sub-epoch startTime renders as uptime duration.

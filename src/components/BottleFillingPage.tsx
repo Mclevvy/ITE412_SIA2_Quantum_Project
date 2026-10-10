@@ -23,7 +23,7 @@ import {
 // Validation: the wine-filler project is external/untrusted — every rendered
 // field is validated here first. Anything malformed degrades to spec copy
 // ("—", "Unknown batch", "Unknown filler status"), never a throw.
-type FillStatus = "pass" | "fail" | "unknown";
+type FillStatus = "pass" | "fail" | "manual" | "unknown";
 
 const isRecord = (v: unknown): v is Record<string, unknown> =>
   typeof v === "object" && v !== null && !Array.isArray(v);
@@ -41,14 +41,14 @@ const validActualMl = (v: unknown): number | null =>
   typeof v === "number" && Number.isFinite(v) && v >= 0 && v <= 10000 ? v : null;
 
 const validStatus = (v: unknown): FillStatus =>
-  v === "pass" ? "pass" : v === "fail" ? "fail" : "unknown";
+  v === "pass" ? "pass" : v === "fail" ? "fail" : v === "manual" ? "manual" : "unknown";
 
 interface FillerLive {
   stage: string;
   batchId: string | null;
   startTime: number | null;
   targetMl: number | null;
-  actualMl: number | null;
+  dispensedMl: number | null;
 }
 
 // Object with a non-empty stage → live state (bad numbers become null → "—").
@@ -62,12 +62,21 @@ function parseCurrentBatch(raw: unknown): FillerLive | null {
     batchId: validBatchId(d.batchId),
     startTime: validTime(d.startTime),
     targetMl: validTargetMl(d.targetVolumeMl),
-    actualMl: validActualMl(d.actualVolumeMl),
+    dispensedMl: validActualMl(d.dispensedMl),
   };
 }
 
 const statusLabel = (s: FillStatus) =>
-  s === "pass" ? "Passed" : s === "fail" ? "Failed" : "Unknown";
+  s === "pass" ? "Passed" : s === "fail" ? "Failed" : s === "manual" ? "Manual" : "Unknown";
+
+// Firmware times are millis-since-boot until NTP lands: < 1e12 renders as
+// uptime duration, >= 1e12 as a date (untouched once real epoch-ms flows).
+const formatFillerTime = (t: number): string =>
+  t < 1e12
+    ? t < 60000
+      ? `${Math.floor(t / 1000)} sec after machine boot`
+      : `${Math.floor(t / 60000)} min after machine boot`
+    : new Date(t).toLocaleString();
 
 const BottleFillingMonitor = () => {
   const unconfigured = fillerDb === null;
@@ -203,8 +212,9 @@ const BottleFillingMonitor = () => {
   else if (!liveLoaded) pageStatus = "loading";
   else if (live === null) pageStatus = history.length > 0 ? "done" : "idle";
   else if (live.stage === "idle") pageStatus = "idle";
-  else if (live.stage === "filling") pageStatus = "filling";
+  else if (live.stage === "filling" || live.stage === "dispensing") pageStatus = "filling";
   else if (live.stage === "done") pageStatus = "done";
+  else if (live.stage === "error") pageStatus = "error";
   else pageStatus = "unknown";
 
   const statusBadge = (() => {
@@ -263,11 +273,11 @@ const BottleFillingMonitor = () => {
 
   // Live volume card values. Bad numbers → "—" + "Reading filler…".
   const targetLabel = live?.targetMl != null ? `${live.targetMl}` : "—";
-  const actualLabel = live?.actualMl != null ? `${live.actualMl}` : "—";
-  const hasNumbers = live?.targetMl != null && live?.actualMl != null;
+  const actualLabel = live?.dispensedMl != null ? `${live.dispensedMl}` : "—";
+  const hasNumbers = live?.targetMl != null && live?.dispensedMl != null;
   const pct =
-    hasNumbers && live?.targetMl && live?.actualMl != null
-      ? Math.min(Math.max((live.actualMl / live.targetMl) * 100, 0), 100)
+    hasNumbers && live?.targetMl && live?.dispensedMl != null
+      ? Math.min(Math.max((live.dispensedMl / live.targetMl) * 100, 0), 100)
       : 0;
   const volumeCaption =
     pageStatus === "idle"
@@ -306,7 +316,9 @@ const BottleFillingMonitor = () => {
       {pageStatus === "error" && (
         <div className="bg-card p-6 rounded-2xl border border-destructive/50 space-y-4">
           <p className="text-muted-foreground text-sm">
-            Couldn&apos;t read the filler database. Check connection and retry.
+            {!fillerError && live?.stage === "error"
+              ? "Filler reported an error."
+              : "Couldn't read the filler database. Check connection and retry."}
           </p>
           <Button
             variant="outline"
@@ -384,9 +396,7 @@ const BottleFillingMonitor = () => {
               </p>
               <p className="text-muted-foreground">
                 Started:{" "}
-                {live?.startTime != null
-                  ? new Date(live.startTime).toLocaleString()
-                  : "—"}
+                {live?.startTime != null ? formatFillerTime(live.startTime) : "—"}
               </p>
               <p className="text-muted-foreground">
                 Target: {live?.targetMl != null ? `${live.targetMl} ml` : "—"}
@@ -422,6 +432,8 @@ const BottleFillingMonitor = () => {
                       <CheckCircle className="w-4 h-4 text-emerald-600" />
                     ) : row.status === "fail" ? (
                       <XCircle className="w-4 h-4 text-destructive" />
+                    ) : row.status === "manual" ? (
+                      <Clock className="w-4 h-4" />
                     ) : (
                       <HelpCircle className="w-4 h-4" />
                     )}
