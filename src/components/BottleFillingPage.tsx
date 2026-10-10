@@ -86,12 +86,20 @@ const BottleFillingMonitor = () => {
   const [fillerError, setFillerError] = useState(false);
   const [retryKey, setRetryKey] = useState(0);
   const [fermentingId, setFermentingId] = useState<string | null>(null);
+  const [sampleKeys, setSampleKeys] = useState<Set<string>>(new Set());
 
-  // Currently-fermenting batch id (primary db, read-only, presence only).
+  // Currently-fermenting batch id + sample-bucket keys (primary db, read-only).
   useEffect(() => {
-    return onValue(ref(db, "fermentation/currentBatch/details"), (snap) => {
+    const unsubFermenting = onValue(ref(db, "fermentation/currentBatch/details"), (snap) => {
       setFermentingId(snap.exists() ? validBatchId(snap.val()?.batchId) : null);
     });
+    const unsubSamples = onValue(ref(db, "fermentation/samples"), (snap) => {
+      setSampleKeys(snap.exists() ? new Set(Object.keys(snap.val() ?? {})) : new Set());
+    });
+    return () => {
+      unsubFermenting();
+      unsubSamples();
+    };
   }, []);
 
   // Single filler source: filling/currentBatch. Never throws — listener errors
@@ -166,37 +174,57 @@ const BottleFillingMonitor = () => {
   // Fill-to-report linkage (Addendum A): primary-db writes only, never filler.
   const linkedRef = useRef<Set<string>>(new Set());
 
-  // Seed already-linked keys once per staged-batch change (single read).
+  // Seed already-linked keys once per staged-batch change: staged fills +
+  // sample bucket (additive so a fill is never written twice or in both).
   useEffect(() => {
     linkedRef.current = new Set();
-    if (!stagedKey || /[.#$\[\]/]/.test(stagedKey)) return;
     let cancelled = false;
-    get(ref(db, `fermentation/history/${stagedKey}/fills`))
+    if (stagedKey && !/[.#$\[\]/]/.test(stagedKey)) {
+      get(ref(db, `fermentation/history/${stagedKey}/fills`))
+        .then((snap) => {
+          if (!cancelled && snap.exists()) {
+            for (const k of Object.keys(snap.val() ?? {})) linkedRef.current.add(k);
+          }
+        })
+        .catch((err) => console.error("fill link seed failed", err));
+    }
+    get(ref(db, "fermentation/samples"))
       .then((snap) => {
-        if (!cancelled && snap.exists()) linkedRef.current = new Set(Object.keys(snap.val() ?? {}));
+        if (!cancelled && snap.exists()) {
+          for (const k of Object.keys(snap.val() ?? {})) linkedRef.current.add(k);
+        }
       })
-      .catch((err) => console.error("fill link seed failed", err));
+      .catch((err) => console.error("sample link seed failed", err));
     return () => {
       cancelled = true;
     };
   }, [stagedKey]);
 
   // Link each completed fill (valid endTime) once, using validated values only.
+  // Addendum C: active batch present → sample bucket; else staged path (untouched).
   useEffect(() => {
-    if (!stagedKey || /[.#$\[\]/]/.test(stagedKey)) return;
     fillerHistory.forEach((item) => {
       const fillerKey = typeof item?.id === "string" ? item.id : null;
       if (!fillerKey || /[.#$\[\]/]/.test(fillerKey) || linkedRef.current.has(fillerKey)) return;
       const end = validTime(item.endTime);
       const actual = validActualMl(item.actualVolumeMl);
       if (end == null || actual == null) return;
+      if (fermentingId) {
+        update(ref(db, "fermentation/samples"), {
+          [fillerKey]: { actualVolumeMl: actual, status: validStatus(item.status), endTime: end, fillerBatchId: validBatchId(item.batchId) ?? "Unknown batch", reason: "active-batch", linkedAt: Date.now() },
+        })
+          .then(() => linkedRef.current.add(fillerKey))
+          .catch((err) => console.error("sample link failed", err));
+        return;
+      }
+      if (!stagedKey || /[.#$\[\]/]/.test(stagedKey)) return;
       update(ref(db, `fermentation/history/${stagedKey}/fills`), {
         [fillerKey]: { actualVolumeMl: actual, status: validStatus(item.status), endTime: end, fillerBatchId: validBatchId(item.batchId) ?? "Unknown batch" },
       })
         .then(() => linkedRef.current.add(fillerKey))
         .catch((err) => console.error("fill link failed", err));
     });
-  }, [fillerHistory, stagedKey]);
+  }, [fillerHistory, stagedKey, fermentingId]);
 
   type PageStatus =
     | "unconfigured"
@@ -438,6 +466,12 @@ const BottleFillingMonitor = () => {
                       <HelpCircle className="w-4 h-4" />
                     )}
                     {statusLabel(row.status)}
+                    {sampleKeys.has(row.key) && (
+                      <Badge variant="secondary">
+                        <Beaker />
+                        Sample
+                      </Badge>
+                    )}
                   </span>
                 </li>
               ))

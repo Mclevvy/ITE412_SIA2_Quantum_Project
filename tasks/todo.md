@@ -63,3 +63,6 @@
 
 ## Task 7: confirmed filler contract (natasha, owns BottleFillingPage.tsx only)
 Per spec Addendum B: map `dispensing`→Active, `error`→Error copy; live progress from `details.dispensedMl`; `manual` status label; sub-epoch startTime renders as uptime duration.
+
+## Task 8: sample bucket (natasha, owns BottleFillingPage.tsx only)
+Per spec Addendum C: completed fill with an ACTIVE batch → `fermentation/samples/{fillerKey}` (not staged); Sample badge on matching history rows; staged path otherwise unchanged.
