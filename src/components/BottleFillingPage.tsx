@@ -121,7 +121,7 @@ const BottleFillingMonitor = () => {
   // Filler history newest-first on the filler project; staged chip on primary.
   const { items: fillerHistory } = useHistoryList(
     "filling/history",
-    { reverse: true },
+    { reverse: true, limit: 50 },
     fillerDb,
   );
   const { items: fermaHistory } = useHistoryList("fermentation/history", {

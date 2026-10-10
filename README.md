@@ -140,3 +140,12 @@ The Fruit Sorting page reads a **different** Firebase project, read-only — con
 - `src/lib/sortingStats.ts` (`summarizeSorting`) is pure and checked by `npm run check:sorting`; ordering handles `b1…b10` via the numeric suffix.
 - Estimated weight assumes **0.45 g per passed (ripe)** and **0.30 g per rejected (unripe)** berry — edit the constants in `sortingStats.ts`.
 - Assumes the log is append-only and never cleared; if it is cleared, the batch collapses to "counts can't be attributed" rather than a wrong number.
+
+## Bottle filling (separate `wine-filler` project)
+
+The Bottle Filling page reads a **third** Firebase project (`wine-filler`), read-only — configured via `VITE_FILLER_*` (see `.env.example`). `src/lib/fillerFirebase.ts` is a named app (`wine-filler`), deliberately tolerant like `sorterFirebase.ts`: an absent or half-filled filler config degrades this one page ("Filler not connected"), it never crashes the app. Never paste the `firebaseConfig` values into the repo — env only.
+
+- Data: `filling/currentBatch` (`{ stage, details: { batchId, startTime, targetVolumeMl } }`) and `filling/history/{pushId}`. Snapshots are external/untrusted and validated before render; an unrecognized `stage` (only `idle` is observed) falls back to "Unknown filler status", never a crash.
+- **No app writes into `wine-filler`.** The filler hardware owns fill start/stop; `endBatch` still writes only ferma (`fermentation/history` + clears) and is unchanged.
+- Handoff: the latest `fermentation/history` entry (sorted by `completedAt`, `limit: 1`) is staged on the page as "Ready to fill: {batchId} · {finalYield}" — the chip tells the operator what goes in next; it is display-only.
+- The unconfigured state keeps showing that staged chip if a finished batch exists, so the ferma half of the page still works without the filler project.
