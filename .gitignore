@@ -20,3 +20,5 @@ ios/App/DerivedData
 *.log
 # Trainer output — model artifacts must not be committed or served
 public/model_abv/
+
+.vercel
